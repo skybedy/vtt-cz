@@ -1,0 +1,9 @@
+bin/
+*.mp3
+*.mp4
+*.webm
+*.mkv
+*.mov
+*.vtt
+*.log
+log.txt
