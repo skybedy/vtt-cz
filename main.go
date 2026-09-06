@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -134,14 +135,6 @@ func userVideosDir() string {
 }
 
 func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
-	pathFile, err := os.CreateTemp("", "vtt-cz-path-*.txt")
-	if err != nil {
-		return "", "", err
-	}
-	pathFilePath := pathFile.Name()
-	pathFile.Close()
-	defer os.Remove(pathFilePath)
-
 	cmd := exec.Command(
 		"yt-dlp",
 		"--cookies-from-browser",
@@ -154,9 +147,6 @@ func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 		"--audio-quality",
 		"64K",
 		"--keep-video",
-		"--print-to-file",
-		"after_move:filepath",
-		pathFilePath,
 		url,
 	)
 
@@ -168,22 +158,14 @@ func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 		return "", "", err
 	}
 
-	pathFileBytes, err := os.ReadFile(pathFilePath)
+	videoPath, err := findFileByExtensions(workDir, []string{".mp4", ".webm", ".mkv", ".mov"})
 	if err != nil {
 		return "", "", err
 	}
 
-	videoPath := lastLine(string(pathFileBytes))
-	if videoPath == "" {
-		return "", "", fmt.Errorf("yt-dlp nevratil cestu ke stazenemu videu")
-	}
-	if !filepath.IsAbs(videoPath) {
-		videoPath = filepath.Join(workDir, videoPath)
-	}
-
-	mp3Path := replaceExtension(videoPath, ".mp3")
-	if _, err := os.Stat(mp3Path); err != nil {
-		return "", "", fmt.Errorf("nenasel jsem vytvoreny MP3 soubor %q", mp3Path)
+	mp3Path, err := findFileByExtensions(workDir, []string{".mp3"})
+	if err != nil {
+		return "", "", err
 	}
 
 	return videoPath, mp3Path, nil
@@ -317,9 +299,11 @@ func burnSubtitles(videoPath string, subtitlesPath string, outputPath string) er
 	fmt.Println()
 	fmt.Println("Vypaluji ceske titulky do videa...")
 
+	style := "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H40000000,BackColour=&H80000000,BorderStyle=3,Outline=4,Shadow=0,Alignment=2,MarginV=50"
 	filter := fmt.Sprintf(
-		"subtitles=%s:force_style='FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H40000000,BackColour=&H80000000,BorderStyle=3,Outline=4,Shadow=0,Alignment=2,MarginV=55'",
-		escapeSubtitlePath(subtitlesPath),
+		"subtitles=filename=%s:force_style=%s",
+		quoteFilterValue(subtitlesPath),
+		quoteFilterValue(style),
 	)
 
 	cmd := exec.Command(
@@ -341,7 +325,7 @@ func burnSubtitles(videoPath string, subtitlesPath string, outputPath string) er
 		"-preset",
 		"veryfast",
 		"-crf",
-		"23",
+		"20",
 		"-c:a",
 		"copy",
 		outputPath,
@@ -433,25 +417,52 @@ func responseOutputText(responseBody []byte) (string, error) {
 	return text, nil
 }
 
-func lastLine(text string) string {
-	lines := strings.Split(strings.TrimSpace(text), "\n")
-	if len(lines) == 0 {
-		return ""
-	}
-
-	return strings.TrimSpace(lines[len(lines)-1])
-}
-
 func replaceExtension(path string, newExtension string) string {
 	extension := filepath.Ext(path)
 	return strings.TrimSuffix(path, extension) + newExtension
 }
 
-func escapeSubtitlePath(path string) string {
-	return strings.NewReplacer(
+func quoteFilterValue(value string) string {
+	escaped := strings.NewReplacer(
 		"\\", "\\\\",
-		":", "\\:",
 		"'", "\\'",
-		",", "\\,",
-	).Replace(path)
+	).Replace(value)
+
+	return "'" + escaped + "'"
+}
+
+func findFileByExtensions(dir string, extensions []string) (string, error) {
+	var matches []string
+
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+
+		fileExtension := strings.ToLower(filepath.Ext(path))
+		for _, extension := range extensions {
+			if fileExtension == extension {
+				matches = append(matches, path)
+				break
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+
+	sort.Strings(matches)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("ve slozce %q jsem nenasel soubor s priponou %s", dir, strings.Join(extensions, ", "))
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("ve slozce %q jsem nasel vic souboru s priponou %s", dir, strings.Join(extensions, ", "))
+	}
+
+	return matches[0], nil
 }

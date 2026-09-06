@@ -56,4 +56,7 @@ V pracovni slozce zustane:
 - cesky `.cs.vtt` soubor
 - nove `.cs.mp4` video s vypalenymi ceskymi titulky
 
+Video s titulky se koduje pres `libx264` s `crf 20`.
+Nizsi CRF znamena vyssi kvalitu a vetsi soubor.
+
 Po nahrani hotoveho videa muzes celou pracovni slozku smazat.
