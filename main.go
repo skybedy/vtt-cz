@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -28,7 +29,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	videoPath, mp3Path, err := downloadVideoAndMP3(url)
+	workDir, err := createWorkDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Chyba pri vytvareni pracovni slozky:", err)
+		os.Exit(1)
+	}
+	fmt.Println("Pracovni slozka:", workDir)
+
+	videoPath, mp3Path, err := downloadVideoAndMP3(url, workDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba:", err)
 		os.Exit(1)
@@ -55,6 +63,7 @@ func main() {
 
 	fmt.Println()
 	fmt.Println("Hotovo:")
+	fmt.Println("Pracovni slozka:", workDir)
 	fmt.Println("Video:", videoPath)
 	fmt.Println("Audio:", mp3Path)
 	fmt.Println("Anglicke titulky:", enVTTPath)
@@ -95,7 +104,36 @@ func readURL() string {
 	return url
 }
 
-func downloadVideoAndMP3(url string) (string, string, error) {
+func createWorkDir() (string, error) {
+	videosDir := userVideosDir()
+	workDir := filepath.Join(videosDir, "yt-dlp-audio", time.Now().Format("20060102-150405"))
+
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return "", err
+	}
+
+	return workDir, nil
+}
+
+func userVideosDir() string {
+	cmd := exec.Command("xdg-user-dir", "VIDEOS")
+	output, err := cmd.Output()
+	if err == nil {
+		videosDir := strings.TrimSpace(string(output))
+		if videosDir != "" {
+			return videosDir
+		}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+
+	return filepath.Join(homeDir, "Videos")
+}
+
+func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 	pathFile, err := os.CreateTemp("", "yt-dlp-audio-path-*.txt")
 	if err != nil {
 		return "", "", err
@@ -122,6 +160,7 @@ func downloadVideoAndMP3(url string) (string, string, error) {
 		url,
 	)
 
+	cmd.Dir = workDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -137,6 +176,9 @@ func downloadVideoAndMP3(url string) (string, string, error) {
 	videoPath := lastLine(string(pathFileBytes))
 	if videoPath == "" {
 		return "", "", fmt.Errorf("yt-dlp nevratil cestu ke stazenemu videu")
+	}
+	if !filepath.IsAbs(videoPath) {
+		videoPath = filepath.Join(workDir, videoPath)
 	}
 
 	mp3Path := replaceExtension(videoPath, ".mp3")
