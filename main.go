@@ -43,17 +43,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	rawEnVTTPath := replaceExtension(videoPath, ".en.raw.vtt")
 	enVTTPath := replaceExtension(videoPath, ".en.vtt")
+	rawCsVTTPath := replaceExtension(videoPath, ".cs.raw.vtt")
 	csVTTPath := replaceExtension(videoPath, ".cs.vtt")
 	outputVideoPath := replaceExtension(videoPath, ".cs.mp4")
 
-	if err := createEnglishVTT(apiKey, mp3Path, enVTTPath); err != nil {
+	if err := createEnglishVTT(apiKey, mp3Path, rawEnVTTPath); err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba pri vytvareni anglickych titulku:", err)
 		os.Exit(1)
 	}
 
-	if err := translateVTTToCzech(apiKey, enVTTPath, csVTTPath); err != nil {
+	if err := reviseEnglishVTT(apiKey, rawEnVTTPath, enVTTPath); err != nil {
+		fmt.Fprintln(os.Stderr, "Chyba pri kontrole anglickych titulku:", err)
+		os.Exit(1)
+	}
+
+	if err := translateVTTToCzech(apiKey, enVTTPath, rawCsVTTPath); err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba pri prekladu titulku:", err)
+		os.Exit(1)
+	}
+
+	if err := reviseCzechVTT(apiKey, rawCsVTTPath, csVTTPath); err != nil {
+		fmt.Fprintln(os.Stderr, "Chyba pri kontrole ceskych titulku:", err)
 		os.Exit(1)
 	}
 
@@ -67,8 +79,10 @@ func main() {
 	fmt.Println("Pracovni slozka:", workDir)
 	fmt.Println("Video:", videoPath)
 	fmt.Println("Audio:", mp3Path)
-	fmt.Println("Anglicke titulky:", enVTTPath)
-	fmt.Println("Ceske titulky:", csVTTPath)
+	fmt.Println("Anglicke titulky z Whisperu:", rawEnVTTPath)
+	fmt.Println("Opravene anglicke titulky:", enVTTPath)
+	fmt.Println("Ceske titulky po prekladu:", rawCsVTTPath)
+	fmt.Println("Finalni ceske titulky:", csVTTPath)
 	fmt.Println("Video s ceskymi titulky:", outputVideoPath)
 }
 
@@ -230,22 +244,65 @@ func createEnglishVTT(apiKey string, mp3Path string, outputPath string) error {
 
 func translateVTTToCzech(apiKey string, inputPath string, outputPath string) error {
 	fmt.Println()
-	fmt.Println("Prekladam titulky do cestiny pres GPT-5...")
+	fmt.Println("Prekladam titulky do cestiny pres GPT-5.5...")
 
 	vttBytes, err := os.ReadFile(inputPath)
 	if err != nil {
 		return err
 	}
 
+	translatedVTT, err := askGPT(apiKey, vttBytes, czechSubtitlePrompt())
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(outputPath, []byte(translatedVTT), 0o644)
+}
+
+func reviseEnglishVTT(apiKey string, inputPath string, outputPath string) error {
+	fmt.Println()
+	fmt.Println("Kontroluji anglicke titulky pres GPT-5.5...")
+
+	vttBytes, err := os.ReadFile(inputPath)
+	if err != nil {
+		return err
+	}
+
+	revisedVTT, err := askGPT(apiKey, vttBytes, englishRevisionPrompt())
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(outputPath, []byte(revisedVTT), 0o644)
+}
+
+func reviseCzechVTT(apiKey string, inputPath string, outputPath string) error {
+	fmt.Println()
+	fmt.Println("Kontroluji ceske titulky pres GPT-5.5...")
+
+	vttBytes, err := os.ReadFile(inputPath)
+	if err != nil {
+		return err
+	}
+
+	revisedVTT, err := askGPT(apiKey, vttBytes, czechRevisionPrompt())
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(outputPath, []byte(revisedVTT), 0o644)
+}
+
+func askGPT(apiKey string, input []byte, prompt string) (string, error) {
 	requestBody := map[string]any{
-		"model": "gpt-5",
+		"model": "gpt-5.5",
 		"input": []map[string]any{
 			{
 				"role": "system",
 				"content": []map[string]string{
 					{
 						"type": "input_text",
-						"text": czechSubtitlePrompt(),
+						"text": prompt,
 					},
 				},
 			},
@@ -254,7 +311,7 @@ func translateVTTToCzech(apiKey string, inputPath string, outputPath string) err
 				"content": []map[string]string{
 					{
 						"type": "input_text",
-						"text": string(vttBytes),
+						"text": string(input),
 					},
 				},
 			},
@@ -263,36 +320,31 @@ func translateVTTToCzech(apiKey string, inputPath string, outputPath string) err
 
 	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	req, err := http.NewRequest(http.MethodPost, openAIResponsesURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("OpenAI API vratilo %s: %s", resp.Status, string(responseBody))
+		return "", fmt.Errorf("OpenAI API vratilo %s: %s", resp.Status, string(responseBody))
 	}
 
-	translatedVTT, err := responseOutputText(responseBody)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(outputPath, []byte(translatedVTT), 0o644)
+	return responseOutputText(responseBody)
 }
 
 func burnSubtitles(videoPath string, subtitlesPath string, outputPath string) error {
@@ -382,6 +434,60 @@ Pred vracenim vysledku zkontroluj:
 Zvlast hlidej, aby posledni ceske bloky odpovidaly skutecnemu konci originalu, ne pasazi, ktera patri drive.
 
 Pokud je z kontextu jasne pohlavi mluvciho, respektuj ho v cestine. Pokud jasne neni, pouzivej neutralni formulace.`
+}
+
+func englishRevisionPrompt() string {
+	return `Zkontroluj a oprav anglicky soubor titulku VTT vytvoreny automatickym prepisem.
+
+Vrat pouze obsah vysledneho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
+
+Zachovej presne:
+- puvodni format VTT,
+- vsechny casove znacky,
+- pocet bloku,
+- poradi bloku,
+- prazdne radky mezi bloky.
+
+Neprekladej titulky do jineho jazyka. Opravuj pouze zjevne chyby prepisu, interpunkci, kapitalizaci, jmena a technicke terminy, pokud je oprava jasna z kontextu.
+
+Kazdy blok musi stale odpovidat stejnemu casovemu useku. Nepresouvej vyznam mezi bloky, neslucuj bloky, nerozdeluj bloky a nevynechavej bloky.
+
+Pokud si opravou nejsi jisty, ponech puvodni text.`
+}
+
+func czechRevisionPrompt() string {
+	return `Zkontroluj a jazykove uprav cesky soubor titulku VTT.
+
+Vrat pouze obsah vysledneho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
+
+Zachovej presne:
+- puvodni format VTT,
+- vsechny casove znacky,
+- pocet bloku,
+- poradi bloku,
+- prazdne radky mezi bloky.
+
+Uprav cestinu tak, aby byla prirozena, titulkova a dobre citelna. Zachovej vyznam originalniho ceskeho textu.
+
+Zvlaste opravuj spatne rozdeleni vet mezi sousednimi titulkovymi bloky. Pokud dalsi blok zacina kratkym dokoncovacim fragmentem predchozi vety, typicky 1 az 3 slovy jako "stava.", "udelali.", "je to.", muzes tento fragment presunout na konec predchoziho bloku a dalsi blok zacit az nasledujici vetou.
+
+Priklad spatne:
+00:01:17.360 --> 00:01:23.680
+Co jsi tim myslel? Myslim, ze jsme jako firma zjevne udelali par kroku vedle, coz se obcas
+
+00:01:23.680 --> 00:01:27.519
+stava. Cast toho, kdyz delate portfolio sazek, je, ze nekdy jich vic
+
+Priklad lepe:
+00:01:17.360 --> 00:01:23.680
+Co jsi tim myslel? Myslim, ze jsme jako firma zjevne udelali par kroku vedle, coz se obcas stava.
+
+00:01:23.680 --> 00:01:27.519
+Cast toho, kdyz delate portfolio sazek, je, ze nekdy jich vic
+
+Tento presun delej pouze mezi bezprostredne sousedicimi bloky a pouze pro kratke fragmenty, ktere zjevne dokoncuji predchozi vetu. Jinak nepresouvej vyznam mezi bloky.
+
+Nemen casove znacky. Nemen pocet bloku. Nevytvarej prazdne bloky. Neslucuj bloky. Nerozdeluj bloky.`
 }
 
 func responseOutputText(responseBody []byte) (string, error) {
