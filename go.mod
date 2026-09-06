@@ -1,4 +1,3 @@
-module yt-dlp-wav
+module vtt-cz
 
 go 1.22
-

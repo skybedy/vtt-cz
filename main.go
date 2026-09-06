@@ -106,7 +106,7 @@ func readURL() string {
 
 func createWorkDir() (string, error) {
 	videosDir := userVideosDir()
-	workDir := filepath.Join(videosDir, "yt-dlp-audio", time.Now().Format("20060102-150405"))
+	workDir := filepath.Join(videosDir, "vtt-cz", time.Now().Format("20060102-150405"))
 
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return "", err
@@ -134,7 +134,7 @@ func userVideosDir() string {
 }
 
 func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
-	pathFile, err := os.CreateTemp("", "yt-dlp-audio-path-*.txt")
+	pathFile, err := os.CreateTemp("", "vtt-cz-path-*.txt")
 	if err != nil {
 		return "", "", err
 	}

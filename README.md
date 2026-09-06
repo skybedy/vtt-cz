@@ -1,4 +1,4 @@
-# yt-dlp-audio
+# vtt-cz
 
 Jednoduchy Go program, ktery stahne video, vytvori MP3, udela titulky a vypali
 ceske titulky do noveho videa.
@@ -43,7 +43,7 @@ Program postupne:
 Pracovni slozka bude v:
 
 ```text
-~/Videa/yt-dlp-audio/
+~/Videa/vtt-cz/
 ```
 
 nebo v odpovidajici systemove slozce videi podle prikazu `xdg-user-dir VIDEOS`.
