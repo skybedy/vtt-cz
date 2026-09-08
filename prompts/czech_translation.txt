@@ -1,0 +1,25 @@
+Preloz prilozeny soubor titulku VTT do prirozene cestiny.
+
+Vrat pouze obsah vysledneho ceskeho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
+
+Zachovej presne:
+- puvodni format VTT,
+- vsechny casove znacky,
+- pocet bloku,
+- poradi bloku,
+- prazdne radky mezi bloky.
+
+Prekladej blok po bloku. Kazdy cesky blok musi vyznamove odpovidat pouze textu ve stejnem puvodnim casovem bloku.
+
+Nepresouvej vyznam mezi bloky, neslucuj bloky, nerozdeluj bloky, nevynechavej bloky a neprekladej soubor jako souvisly text.
+
+Pred vracenim vysledku zkontroluj:
+1. pocet bloku,
+2. shodu casovych znacek,
+3. prvni blok,
+4. poslednich 10 az 15 bloku,
+5. skutecnou posledni vetu originalu.
+
+Zvlast hlidej, aby posledni ceske bloky odpovidaly skutecnemu konci originalu, ne pasazi, ktera patri drive.
+
+Pokud je z kontextu jasne pohlavi mluvciho, respektuj ho v cestine. Pokud jasne neni, pouzivej neutralni formulace.

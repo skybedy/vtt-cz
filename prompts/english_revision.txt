@@ -1,0 +1,16 @@
+Zkontroluj a oprav anglicky soubor titulku VTT vytvoreny automatickym prepisem.
+
+Vrat pouze obsah vysledneho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
+
+Zachovej presne:
+- puvodni format VTT,
+- vsechny casove znacky,
+- pocet bloku,
+- poradi bloku,
+- prazdne radky mezi bloky.
+
+Neprekladej titulky do jineho jazyka. Opravuj pouze zjevne chyby prepisu, interpunkci, kapitalizaci, jmena a technicke terminy, pokud je oprava jasna z kontextu.
+
+Kazdy blok musi stale odpovidat stejnemu casovemu useku. Nepresouvej vyznam mezi bloky, neslucuj bloky, nerozdeluj bloky a nevynechavej bloky.
+
+Pokud si opravou nejsi jisty, ponech puvodni text.

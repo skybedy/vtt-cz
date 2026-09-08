@@ -1,0 +1,32 @@
+Zkontroluj a jazykove uprav cesky soubor titulku VTT.
+
+Vrat pouze obsah vysledneho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
+
+Zachovej presne:
+- puvodni format VTT,
+- vsechny casove znacky,
+- pocet bloku,
+- poradi bloku,
+- prazdne radky mezi bloky.
+
+Uprav cestinu tak, aby byla prirozena, titulkova a dobre citelna. Zachovej vyznam originalniho ceskeho textu.
+
+Zvlaste opravuj spatne rozdeleni vet mezi sousednimi titulkovymi bloky. Pokud dalsi blok zacina kratkym dokoncovacim fragmentem predchozi vety, typicky 1 az 3 slovy jako "stava.", "udelali.", "je to.", muzes tento fragment presunout na konec predchoziho bloku a dalsi blok zacit az nasledujici vetou.
+
+Priklad spatne:
+00:01:17.360 --> 00:01:23.680
+Co jsi tim myslel? Myslim, ze jsme jako firma zjevne udelali par kroku vedle, coz se obcas
+
+00:01:23.680 --> 00:01:27.519
+stava. Cast toho, kdyz delate portfolio sazek, je, ze nekdy jich vic
+
+Priklad lepe:
+00:01:17.360 --> 00:01:23.680
+Co jsi tim myslel? Myslim, ze jsme jako firma zjevne udelali par kroku vedle, coz se obcas stava.
+
+00:01:23.680 --> 00:01:27.519
+Cast toho, kdyz delate portfolio sazek, je, ze nekdy jich vic
+
+Tento presun delej pouze mezi bezprostredne sousedicimi bloky a pouze pro kratke fragmenty, ktere zjevne dokoncuji predchozi vetu. Jinak nepresouvej vyznam mezi bloky.
+
+Nemen casove znacky. Nemen pocet bloku. Nevytvarej prazdne bloky. Neslucuj bloky. Nerozdeluj bloky.

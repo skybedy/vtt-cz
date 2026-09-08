@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,15 @@ const (
 	openAIResponsesURL      = "https://api.openai.com/v1/responses"
 	maxTranscriptionBytes   = 25 * 1024 * 1024
 )
+
+//go:embed prompts/czech_translation.txt
+var czechTranslationPrompt string
+
+//go:embed prompts/english_revision.txt
+var englishRevisionPrompt string
+
+//go:embed prompts/czech_revision.txt
+var czechRevisionPrompt string
 
 func main() {
 	url := readURL()
@@ -189,24 +199,21 @@ func createEnglishVTT(apiKey string, mp3Path string, outputPath string) error {
 	fmt.Println()
 	fmt.Println("Vytvarim anglicke VTT titulky pres Whisper...")
 
-	mp3Info, err := os.Stat(mp3Path)
+	transcriptionAudioPath, err := prepareTranscriptionAudio(mp3Path)
 	if err != nil {
 		return err
-	}
-	if mp3Info.Size() > maxTranscriptionBytes {
-		return fmt.Errorf("MP3 soubor ma %.1f MB, ale OpenAI transcription API prijima nejvyse 25 MB", float64(mp3Info.Size())/1024/1024)
 	}
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
-	file, err := os.Open(mp3Path)
+	file, err := os.Open(transcriptionAudioPath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	fileWriter, err := writer.CreateFormFile("file", filepath.Base(mp3Path))
+	fileWriter, err := writer.CreateFormFile("file", filepath.Base(transcriptionAudioPath))
 	if err != nil {
 		return err
 	}
@@ -242,6 +249,74 @@ func createEnglishVTT(apiKey string, mp3Path string, outputPath string) error {
 	return os.WriteFile(outputPath, responseBody, 0o644)
 }
 
+func prepareTranscriptionAudio(mp3Path string) (string, error) {
+	mp3Info, err := os.Stat(mp3Path)
+	if err != nil {
+		return "", err
+	}
+
+	if mp3Info.Size() <= maxTranscriptionBytes {
+		return mp3Path, nil
+	}
+
+	fmt.Printf(
+		"MP3 soubor ma %.1f MB, vytvarim mensi kopii pro Whisper...\n",
+		float64(mp3Info.Size())/1024/1024,
+	)
+
+	outputPath := replaceExtension(mp3Path, ".whisper.mp3")
+	bitrates := []string{"32k", "24k", "16k"}
+
+	for _, bitrate := range bitrates {
+		fmt.Println("Zkousim audio pro Whisper s bitrate:", bitrate)
+
+		cmd := exec.Command(
+			"ffmpeg",
+			"-y",
+			"-i",
+			mp3Path,
+			"-vn",
+			"-ac",
+			"1",
+			"-ar",
+			"16000",
+			"-b:a",
+			bitrate,
+			outputPath,
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			return "", err
+		}
+
+		outputInfo, err := os.Stat(outputPath)
+		if err != nil {
+			return "", err
+		}
+
+		if outputInfo.Size() <= maxTranscriptionBytes {
+			fmt.Printf(
+				"Audio pro Whisper ma %.1f MB: %s\n",
+				float64(outputInfo.Size())/1024/1024,
+				outputPath,
+			)
+			return outputPath, nil
+		}
+	}
+
+	outputInfo, err := os.Stat(outputPath)
+	if err != nil {
+		return "", err
+	}
+
+	return "", fmt.Errorf(
+		"audio pro Whisper ma i po zmenseni %.1f MB, ale OpenAI transcription API prijima nejvyse 25 MB",
+		float64(outputInfo.Size())/1024/1024,
+	)
+}
+
 func translateVTTToCzech(apiKey string, inputPath string, outputPath string) error {
 	fmt.Println()
 	fmt.Println("Prekladam titulky do cestiny pres GPT-5.5...")
@@ -251,7 +326,7 @@ func translateVTTToCzech(apiKey string, inputPath string, outputPath string) err
 		return err
 	}
 
-	translatedVTT, err := askGPT(apiKey, vttBytes, czechSubtitlePrompt())
+	translatedVTT, err := askGPT(apiKey, vttBytes, czechTranslationPrompt)
 	if err != nil {
 		return err
 	}
@@ -268,7 +343,7 @@ func reviseEnglishVTT(apiKey string, inputPath string, outputPath string) error 
 		return err
 	}
 
-	revisedVTT, err := askGPT(apiKey, vttBytes, englishRevisionPrompt())
+	revisedVTT, err := askGPT(apiKey, vttBytes, englishRevisionPrompt)
 	if err != nil {
 		return err
 	}
@@ -285,7 +360,7 @@ func reviseCzechVTT(apiKey string, inputPath string, outputPath string) error {
 		return err
 	}
 
-	revisedVTT, err := askGPT(apiKey, vttBytes, czechRevisionPrompt())
+	revisedVTT, err := askGPT(apiKey, vttBytes, czechRevisionPrompt)
 	if err != nil {
 		return err
 	}
@@ -406,88 +481,6 @@ func cleanURL(input string) string {
 	}
 
 	return input
-}
-
-func czechSubtitlePrompt() string {
-	return `Preloz prilozeny soubor titulku VTT do prirozene cestiny.
-
-Vrat pouze obsah vysledneho ceskeho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
-
-Zachovej presne:
-- puvodni format VTT,
-- vsechny casove znacky,
-- pocet bloku,
-- poradi bloku,
-- prazdne radky mezi bloky.
-
-Prekladej blok po bloku. Kazdy cesky blok musi vyznamove odpovidat pouze textu ve stejnem puvodnim casovem bloku.
-
-Nepresouvej vyznam mezi bloky, neslucuj bloky, nerozdeluj bloky, nevynechavej bloky a neprekladej soubor jako souvisly text.
-
-Pred vracenim vysledku zkontroluj:
-1. pocet bloku,
-2. shodu casovych znacek,
-3. prvni blok,
-4. poslednich 10 az 15 bloku,
-5. skutecnou posledni vetu originalu.
-
-Zvlast hlidej, aby posledni ceske bloky odpovidaly skutecnemu konci originalu, ne pasazi, ktera patri drive.
-
-Pokud je z kontextu jasne pohlavi mluvciho, respektuj ho v cestine. Pokud jasne neni, pouzivej neutralni formulace.`
-}
-
-func englishRevisionPrompt() string {
-	return `Zkontroluj a oprav anglicky soubor titulku VTT vytvoreny automatickym prepisem.
-
-Vrat pouze obsah vysledneho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
-
-Zachovej presne:
-- puvodni format VTT,
-- vsechny casove znacky,
-- pocet bloku,
-- poradi bloku,
-- prazdne radky mezi bloky.
-
-Neprekladej titulky do jineho jazyka. Opravuj pouze zjevne chyby prepisu, interpunkci, kapitalizaci, jmena a technicke terminy, pokud je oprava jasna z kontextu.
-
-Kazdy blok musi stale odpovidat stejnemu casovemu useku. Nepresouvej vyznam mezi bloky, neslucuj bloky, nerozdeluj bloky a nevynechavej bloky.
-
-Pokud si opravou nejsi jisty, ponech puvodni text.`
-}
-
-func czechRevisionPrompt() string {
-	return `Zkontroluj a jazykove uprav cesky soubor titulku VTT.
-
-Vrat pouze obsah vysledneho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
-
-Zachovej presne:
-- puvodni format VTT,
-- vsechny casove znacky,
-- pocet bloku,
-- poradi bloku,
-- prazdne radky mezi bloky.
-
-Uprav cestinu tak, aby byla prirozena, titulkova a dobre citelna. Zachovej vyznam originalniho ceskeho textu.
-
-Zvlaste opravuj spatne rozdeleni vet mezi sousednimi titulkovymi bloky. Pokud dalsi blok zacina kratkym dokoncovacim fragmentem predchozi vety, typicky 1 az 3 slovy jako "stava.", "udelali.", "je to.", muzes tento fragment presunout na konec predchoziho bloku a dalsi blok zacit az nasledujici vetou.
-
-Priklad spatne:
-00:01:17.360 --> 00:01:23.680
-Co jsi tim myslel? Myslim, ze jsme jako firma zjevne udelali par kroku vedle, coz se obcas
-
-00:01:23.680 --> 00:01:27.519
-stava. Cast toho, kdyz delate portfolio sazek, je, ze nekdy jich vic
-
-Priklad lepe:
-00:01:17.360 --> 00:01:23.680
-Co jsi tim myslel? Myslim, ze jsme jako firma zjevne udelali par kroku vedle, coz se obcas stava.
-
-00:01:23.680 --> 00:01:27.519
-Cast toho, kdyz delate portfolio sazek, je, ze nekdy jich vic
-
-Tento presun delej pouze mezi bezprostredne sousedicimi bloky a pouze pro kratke fragmenty, ktere zjevne dokoncuji predchozi vetu. Jinak nepresouvej vyznam mezi bloky.
-
-Nemen casove znacky. Nemen pocet bloku. Nevytvarej prazdne bloky. Neslucuj bloky. Nerozdeluj bloky.`
 }
 
 func responseOutputText(responseBody []byte) (string, error) {
