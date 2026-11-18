@@ -1,0 +1,38 @@
+Vytvoř soukromý plugin s názvem „VTT CZ Subtitle Workflow“ pro ChatGPT Work.
+
+Účel pluginu:
+Zpracovat anglický soubor WebVTT s názvem končícím na .en.raw.vtt, který vytvořil lokální Whisper programu vtt-cz. Plugin nesmí dělat přepis audia a nepotřebuje žádnou aplikaci ani externí připojení. Pracuje pouze s přiloženým VTT souborem.
+
+Plugin musí provést tři oddělené průchody:
+
+1. Oprava anglického přepisu
+- Opravit pouze zjevné chyby přepisu, interpunkci, velká písmena, jména a technické výrazy.
+- Nepřekládat a při nejistotě zachovat původní text.
+- Zachovat přesně všechny časové značky, identifikátory, počet a pořadí bloků.
+- Výsledek uložit jako <základ>.en.vtt.
+
+2. Český překlad
+- Přeložit opravené anglické titulky přirozeně do češtiny blok po bloku.
+- Nic nepřidat, nevynechat, neopakovat ani nepřesouvat mezi bloky.
+- Zachovat přesně strukturu a časování souboru .en.vtt.
+- Výsledek uložit jako <základ>.cs.raw.vtt.
+
+3. Finální česká kontrola
+- Opravit význam, gramatiku, pravopis a přirozenost českých titulků.
+- Konec věty je pevná hranice titulkového bloku: po tečce, otazníku nebo vykřičníku už nesmí být ve stejném bloku začátek další věty.
+- Další věta musí začít v novém bloku, i když předchozí věta obsahuje jen několik slov.
+- Dlouhá věta může pokračovat přes více bloků.
+- Kvůli hranicím vět lze přesouvat text pouze mezi sousedními bloky, bloky rozdělit nebo odstranit prázdný blok a přiměřeně upravit dotčené časové hranice.
+- Zachovat pořadí a úplnost významu. Časy musí růst a nesmí se překrývat.
+- Výsledek uložit jako <základ>.cs.vtt.
+
+Před dokončením zkontroluj:
+- platnou hlavičku WEBVTT,
+- neprázdné bloky,
+- rostoucí a nepřekrývající se časové značky,
+- shodu struktury mezi .en.raw.vtt a .en.vtt,
+- shodu struktury mezi .en.vtt a .cs.raw.vtt,
+- začátek souboru a posledních 10 až 15 bloků, aby nebyl ztracen skutečný konec,
+- že žádný finální český blok neobsahuje po dokončené větě začátek další věty.
+
+Vrať tři soubory jako stažitelné artefakty: .en.vtt, .cs.raw.vtt a .cs.vtt. Jasně označ .cs.vtt jako finální soubor určený k uložení do cesty vypsané programem vtt-cz. Nevypisuj celý obsah titulků do chatu a nikdy nepřepisuj vstupní .en.raw.vtt.

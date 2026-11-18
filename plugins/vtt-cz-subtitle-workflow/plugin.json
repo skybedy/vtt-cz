@@ -1,0 +1,30 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "vtt-cz-subtitle-workflow",
+  "version": "0.1.0",
+  "description": "Correct English WebVTT subtitles, translate them to Czech, and produce a validated final Czech VTT for the vtt-cz CLI.",
+  "keywords": [
+    "subtitles",
+    "webvtt",
+    "translation",
+    "czech"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "VTT CZ Subtitle Workflow",
+        "shortDescription": "Oprava a překlad VTT titulků do češtiny",
+        "longDescription": "Ve třech kontrolovaných průchodech opraví anglický přepis, přeloží titulky do češtiny a vytvoří finální validované VTT pro návrat do programu vtt-cz.",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "defaultPrompt": [
+          "Zpracuj přiložený soubor .en.raw.vtt a vrať finální český .cs.vtt pro program vtt-cz."
+        ],
+        "brandColor": "#2563EB"
+      }
+    }
+  }
+}

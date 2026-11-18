@@ -1,0 +1,4 @@
+interface:
+  display_name: "VTT CZ Work Translation"
+  short_description: "Opraví a přeloží anglické VTT do češtiny"
+  default_prompt: "Use $vtt-cz-work-translation to process the attached English VTT into a final Czech VTT."
