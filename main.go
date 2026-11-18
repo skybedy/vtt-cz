@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -13,8 +14,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"vtt-cz/internal/localwhisper"
 )
 
 const (
@@ -33,24 +37,56 @@ var englishRevisionPrompt string
 var czechRevisionPrompt string
 
 func main() {
-	url := readURL()
+	if wantsHelp(os.Args[1:]) {
+		printUsage()
+		return
+	}
+
+	mode, input, localWhisper, workMode, err := parseArguments(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Chyba:", err)
+		printUsage()
+		os.Exit(1)
+	}
+
 	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
+	if !workMode && apiKey == "" {
 		fmt.Fprintln(os.Stderr, "Chybi promenna prostredi OPENAI_API_KEY.")
 		os.Exit(1)
 	}
 
-	workDir, err := createWorkDir()
+	reader := bufio.NewReader(os.Stdin)
+	workDir, videoPath, mp3Path, resumed, err := resumeExistingWork(reader, mode, input, workMode)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Chyba pri vytvareni pracovni slozky:", err)
+		fmt.Fprintln(os.Stderr, "Chyba pri hledani rozpracovane ulohy:", err)
 		os.Exit(1)
 	}
-	fmt.Println("Pracovni slozka:", workDir)
 
-	videoPath, mp3Path, err := downloadVideoAndMP3(url, workDir)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Chyba:", err)
-		os.Exit(1)
+	if !resumed {
+		workDir, err = createWorkDir()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Chyba pri vytvareni pracovni slozky:", err)
+			os.Exit(1)
+		}
+		fmt.Println("Pracovni slozka:", workDir)
+		if workMode {
+			if err := os.WriteFile(filepath.Join(workDir, ".work-mode"), []byte("work\n"), 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, "Chyba pri oznaceni Work ulohy:", err)
+				os.Exit(1)
+			}
+		}
+
+		switch mode {
+		case "dvd":
+			videoPath, mp3Path, err = importDVD(reader, input, workDir)
+		default:
+			url := readURL(reader, input)
+			videoPath, mp3Path, err = downloadVideoAndMP3(url, workDir)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Chyba:", err)
+			os.Exit(1)
+		}
 	}
 
 	rawEnVTTPath := replaceExtension(videoPath, ".en.raw.vtt")
@@ -58,28 +94,45 @@ func main() {
 	rawCsVTTPath := replaceExtension(videoPath, ".cs.raw.vtt")
 	csVTTPath := replaceExtension(videoPath, ".cs.vtt")
 	outputVideoPath := replaceExtension(videoPath, ".cs.mp4")
+	if workMode {
+		if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath); err != nil {
+			fmt.Fprintln(os.Stderr, "Chyba v rezimu ChatGPT Work:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
-	if err := createEnglishVTT(apiKey, mp3Path, rawEnVTTPath); err != nil {
+	if err := runUnlessFileExists(rawEnVTTPath, "Anglicke titulky z Whisperu uz existuji, preskakuji tento krok.", func() error {
+		return createEnglishVTT(apiKey, mp3Path, rawEnVTTPath, localWhisper)
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba pri vytvareni anglickych titulku:", err)
 		os.Exit(1)
 	}
 
-	if err := reviseEnglishVTT(apiKey, rawEnVTTPath, enVTTPath); err != nil {
+	if err := runUnlessFileExists(enVTTPath, "Opravene anglicke titulky uz existuji, preskakuji tento krok.", func() error {
+		return reviseEnglishVTT(apiKey, rawEnVTTPath, enVTTPath)
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba pri kontrole anglickych titulku:", err)
 		os.Exit(1)
 	}
 
-	if err := translateVTTToCzech(apiKey, enVTTPath, rawCsVTTPath); err != nil {
+	if err := runUnlessFileExists(rawCsVTTPath, "Ceske titulky po prekladu uz existuji, preskakuji tento krok.", func() error {
+		return translateVTTToCzech(apiKey, enVTTPath, rawCsVTTPath)
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba pri prekladu titulku:", err)
 		os.Exit(1)
 	}
 
-	if err := reviseCzechVTT(apiKey, rawCsVTTPath, csVTTPath); err != nil {
+	if err := runUnlessFileExists(csVTTPath, "Finalni ceske titulky uz existuji, preskakuji tento krok.", func() error {
+		return reviseCzechVTT(apiKey, rawCsVTTPath, csVTTPath)
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba pri kontrole ceskych titulku:", err)
 		os.Exit(1)
 	}
 
-	if err := burnSubtitles(videoPath, csVTTPath, outputVideoPath); err != nil {
+	if err := runUnlessFileExists(outputVideoPath, "Video s ceskymi titulky uz existuje, preskakuji tento krok.", func() error {
+		return burnSubtitles(videoPath, csVTTPath, outputVideoPath)
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba pri vypalovani titulku:", err)
 		os.Exit(1)
 	}
@@ -96,26 +149,59 @@ func main() {
 	fmt.Println("Video s ceskymi titulky:", outputVideoPath)
 }
 
-func readURL() string {
-	url := ""
+func wantsHelp(args []string) bool {
+	return len(args) == 1 && (args[0] == "-h" || args[0] == "--help")
+}
 
-	if len(os.Args) == 1 {
+func parseArguments(args []string) (string, string, bool, bool, error) {
+	mode := "url"
+	input := ""
+	localWhisper := false
+	workMode := false
+
+	for _, arg := range args {
+		switch arg {
+		case "--dvd":
+			if mode == "dvd" {
+				return "", "", false, false, fmt.Errorf("prepinac --dvd je zadan vicekrat")
+			}
+			mode = "dvd"
+		case "--local-whisper":
+			if localWhisper {
+				return "", "", false, false, fmt.Errorf("prepinac --local-whisper je zadan vicekrat")
+			}
+			localWhisper = true
+		case "--work":
+			if workMode {
+				return "", "", false, false, fmt.Errorf("prepinac --work je zadan vicekrat")
+			}
+			workMode = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return "", "", false, false, fmt.Errorf("neznamy prepinac %q", arg)
+			}
+			if input != "" {
+				return "", "", false, false, fmt.Errorf("lze zadat nejvyse jednu URL nebo cestu k DVD")
+			}
+			input = arg
+		}
+	}
+	if localWhisper && workMode {
+		return "", "", false, false, fmt.Errorf("--work uz lokalni Whisper zapina; nepouzivej soucasne --local-whisper")
+	}
+
+	return mode, input, localWhisper, workMode, nil
+}
+
+func readURL(reader *bufio.Reader, initialURL string) string {
+	url := initialURL
+
+	if url == "" {
 		fmt.Print("Zadej URL videa: ")
-
-		scanner := bufio.NewScanner(os.Stdin)
-		if scanner.Scan() {
-			url = scanner.Text()
+		line, err := reader.ReadString('\n')
+		if err == nil || len(line) > 0 {
+			url = line
 		}
-	} else if len(os.Args) == 2 {
-		if os.Args[1] == "-h" || os.Args[1] == "--help" {
-			printUsage()
-			os.Exit(0)
-		}
-
-		url = os.Args[1]
-	} else {
-		printUsage()
-		os.Exit(1)
 	}
 
 	url = strings.TrimSpace(url)
@@ -127,6 +213,282 @@ func readURL() string {
 	}
 
 	return url
+}
+
+func resumeExistingWork(reader *bufio.Reader, mode string, input string, workMode bool) (string, string, string, bool, error) {
+	if mode != "url" || input != "" {
+		return "", "", "", false, nil
+	}
+
+	workDir, videoPath, mp3Path, found, err := findLatestIncompleteWork(workMode)
+	if err != nil || !found {
+		return "", "", "", false, err
+	}
+
+	fmt.Println("Nalezena rozpracovana uloha:", workDir)
+	fmt.Println("Video:", videoPath)
+	fmt.Println("Audio:", mp3Path)
+	fmt.Print("Chces z ni pokracovat? [A/n]: ")
+
+	answer, readErr := reader.ReadString('\n')
+	if readErr != nil && len(answer) == 0 && readErr != io.EOF {
+		return "", "", "", false, readErr
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer == "" || answer == "a" || answer == "ano" || answer == "y" || answer == "yes" {
+		fmt.Println("Pokracuji bez opetovneho stahovani videa a vytvareni MP3.")
+		return workDir, videoPath, mp3Path, true, nil
+	}
+
+	return "", "", "", false, nil
+}
+
+func findLatestIncompleteWork(workMode bool) (string, string, string, bool, error) {
+	rootDir := filepath.Join(userVideosDir(), "vtt-cz")
+	entries, err := os.ReadDir(rootDir)
+	if os.IsNotExist(err) {
+		return "", "", "", false, nil
+	}
+	if err != nil {
+		return "", "", "", false, err
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() > entries[j].Name()
+	})
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		workDir := filepath.Join(rootDir, entry.Name())
+		if fileExists(filepath.Join(workDir, ".work-mode")) != workMode {
+			continue
+		}
+		videoPath, mp3Path, found, err := findExistingVideoAndMP3(workDir)
+		if err != nil {
+			return "", "", "", false, err
+		}
+		if !found || fileExists(replaceExtension(videoPath, ".cs.mp4")) {
+			continue
+		}
+
+		return workDir, videoPath, mp3Path, true, nil
+	}
+
+	return "", "", "", false, nil
+}
+
+func findExistingVideoAndMP3(workDir string) (string, string, bool, error) {
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return "", "", false, err
+	}
+
+	videoExtensions := map[string]bool{
+		".mp4":  true,
+		".webm": true,
+		".mkv":  true,
+		".mov":  true,
+	}
+	videosByStem := make(map[string]string)
+	var mp3Paths []string
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		extension := strings.ToLower(filepath.Ext(name))
+		stem := strings.TrimSuffix(name, filepath.Ext(name))
+		path := filepath.Join(workDir, name)
+
+		if extension == ".mp3" && !strings.HasSuffix(strings.ToLower(stem), ".whisper") && fileExists(path) {
+			mp3Paths = append(mp3Paths, path)
+		}
+		if videoExtensions[extension] && !strings.HasSuffix(strings.ToLower(stem), ".cs") && fileExists(path) {
+			videosByStem[stem] = path
+		}
+	}
+
+	sort.Strings(mp3Paths)
+	for _, mp3Path := range mp3Paths {
+		stem := strings.TrimSuffix(filepath.Base(mp3Path), filepath.Ext(mp3Path))
+		if videoPath, ok := videosByStem[stem]; ok {
+			return videoPath, mp3Path, true, nil
+		}
+	}
+
+	return "", "", false, nil
+}
+
+func runUnlessFileExists(path string, skipMessage string, run func() error) error {
+	if fileExists(path) {
+		fmt.Println()
+		fmt.Println(skipMessage)
+		return nil
+	}
+
+	return run()
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && info.Size() > 0
+}
+
+func runWorkMode(workDir string, videoPath string, mp3Path string, rawEnVTTPath string, csVTTPath string, outputVideoPath string) error {
+	if err := runUnlessFileExists(rawEnVTTPath, "Lokalni anglicke titulky uz existuji, preskakuji prepis.", func() error {
+		return createEnglishVTTLocal(mp3Path, rawEnVTTPath)
+	}); err != nil {
+		return fmt.Errorf("lokalni vytvoreni anglickych titulku: %w", err)
+	}
+
+	if !fileExists(csVTTPath) {
+		instructionsPath := filepath.Join(workDir, "CHATGPT-WORK.txt")
+		resumeCommand := executableCommand("--work")
+		instructions := fmt.Sprintf(
+			"CHATGPT WORK - DOKONCENI TITULKU\n\n"+
+				"1. V ChatGPT Work vyber plugin @VTT CZ Subtitle Workflow.\n"+
+				"2. Nahraj tento anglicky VTT soubor:\n%s\n"+
+				"3. Zadej: Zpracuj tento soubor a vrat finalni cesky VTT pro vtt-cz.\n"+
+				"4. Stahni finalni soubor .cs.vtt a uloz ho presne sem:\n%s\n"+
+				"5. Znovu spust: %s\n\n"+
+				"Program pak ceske VTT overi a vypali do videa.\n",
+			rawEnVTTPath,
+			csVTTPath,
+			resumeCommand,
+		)
+		if err := os.WriteFile(instructionsPath, []byte(instructions), 0o644); err != nil {
+			return fmt.Errorf("ulozeni navodu pro ChatGPT Work: %w", err)
+		}
+
+		fmt.Println()
+		fmt.Println("Lokalni prepis je hotovy. Program ted ceka na zpracovani v ChatGPT Work.")
+		fmt.Println("Anglicky VTT pro nahrani:", rawEnVTTPath)
+		fmt.Println("Cesky VTT uloz presne jako:", csVTTPath)
+		fmt.Println("Navod:", instructionsPath)
+		fmt.Println("Potom znovu spust:", resumeCommand)
+		return nil
+	}
+
+	if err := validateVTTFile(csVTTPath); err != nil {
+		return fmt.Errorf("vracene ceske VTT neni platne: %w", err)
+	}
+	if err := runUnlessFileExists(outputVideoPath, "Video s ceskymi titulky uz existuje, preskakuji vypalovani.", func() error {
+		return burnSubtitles(videoPath, csVTTPath, outputVideoPath)
+	}); err != nil {
+		return fmt.Errorf("vypalovani titulku: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("Hotovo:")
+	fmt.Println("Pracovni slozka:", workDir)
+	fmt.Println("Anglicke titulky z lokalniho Whisperu:", rawEnVTTPath)
+	fmt.Println("Finalni ceske titulky z ChatGPT Work:", csVTTPath)
+	fmt.Println("Video s ceskymi titulky:", outputVideoPath)
+	return nil
+}
+
+func validateVTTFile(path string) error {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	text := strings.TrimPrefix(string(contents), "\ufeff")
+	if !strings.HasPrefix(text, "WEBVTT") {
+		return fmt.Errorf("soubor nezacina hlavickou WEBVTT")
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(text))
+	lineNumber := 0
+	cueCount := 0
+	inCue := false
+	cueHasText := false
+	var previousEnd time.Duration
+
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.Contains(line, "-->") {
+			if inCue && line != "" {
+				cueHasText = true
+			}
+			continue
+		}
+
+		if inCue && !cueHasText {
+			return fmt.Errorf("blok pred radkem %d nema text", lineNumber)
+		}
+		parts := strings.SplitN(line, "-->", 2)
+		start, err := parseVTTTimestamp(strings.TrimSpace(parts[0]))
+		if err != nil {
+			return fmt.Errorf("radek %d: %w", lineNumber, err)
+		}
+		endField := strings.Fields(strings.TrimSpace(parts[1]))
+		if len(endField) == 0 {
+			return fmt.Errorf("radek %d: chybi koncovy cas", lineNumber)
+		}
+		end, err := parseVTTTimestamp(endField[0])
+		if err != nil {
+			return fmt.Errorf("radek %d: %w", lineNumber, err)
+		}
+		if start >= end {
+			return fmt.Errorf("radek %d: zacatek titulku neni pred koncem", lineNumber)
+		}
+		if cueCount > 0 && start < previousEnd {
+			return fmt.Errorf("radek %d: titulek se prekryva s predchozim", lineNumber)
+		}
+
+		cueCount++
+		inCue = true
+		cueHasText = false
+		previousEnd = end
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if cueCount == 0 {
+		return fmt.Errorf("soubor neobsahuje zadny titulkovy blok")
+	}
+	if !cueHasText {
+		return fmt.Errorf("posledni titulkovy blok nema text")
+	}
+	return nil
+}
+
+func parseVTTTimestamp(value string) (time.Duration, error) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("neplatny cas %q", value)
+	}
+	hours, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, fmt.Errorf("neplatny cas %q", value)
+	}
+	minutes, err := strconv.Atoi(parts[1])
+	if err != nil || minutes < 0 || minutes > 59 {
+		return 0, fmt.Errorf("neplatny cas %q", value)
+	}
+	secondParts := strings.Split(parts[2], ".")
+	if len(secondParts) != 2 || len(secondParts[1]) != 3 {
+		return 0, fmt.Errorf("neplatny cas %q", value)
+	}
+	seconds, err := strconv.Atoi(secondParts[0])
+	if err != nil || seconds < 0 || seconds > 59 {
+		return 0, fmt.Errorf("neplatny cas %q", value)
+	}
+	milliseconds, err := strconv.Atoi(secondParts[1])
+	if err != nil {
+		return 0, fmt.Errorf("neplatny cas %q", value)
+	}
+
+	return time.Duration(hours)*time.Hour +
+		time.Duration(minutes)*time.Minute +
+		time.Duration(seconds)*time.Second +
+		time.Duration(milliseconds)*time.Millisecond, nil
 }
 
 func createWorkDir() (string, error) {
@@ -159,8 +521,18 @@ func userVideosDir() string {
 }
 
 func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
+	ytDLPPath, err := exec.LookPath("yt-dlp")
+	if err != nil {
+		return "", "", fmt.Errorf("program yt-dlp neni nainstalovany: %w", err)
+	}
+
+	if err := updateYTDLP(ytDLPPath); err != nil {
+		fmt.Fprintln(os.Stderr, "Varovani: automaticka aktualizace yt-dlp se nepovedla:", err)
+		fmt.Fprintln(os.Stderr, "Pokracuji se stavajici verzi yt-dlp.")
+	}
+
 	cmd := exec.Command(
-		"yt-dlp",
+		ytDLPPath,
 		"--cookies-from-browser",
 		"firefox",
 		"--format",
@@ -195,9 +567,427 @@ func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 	return videoPath, mp3Path, nil
 }
 
-func createEnglishVTT(apiKey string, mp3Path string, outputPath string) error {
+func updateYTDLP(ytDLPPath string) error {
 	fmt.Println()
-	fmt.Println("Vytvarim anglicke VTT titulky pres Whisper...")
+	fmt.Println("Kontroluji aktualizaci yt-dlp...")
+
+	cmd := exec.Command(ytDLPPath, "-U")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type dvdAudioTrack struct {
+	Number      int
+	Description string
+}
+
+type dvdTitle struct {
+	Number      int
+	Duration    time.Duration
+	AudioTracks []dvdAudioTrack
+}
+
+func importDVD(reader *bufio.Reader, source string, workDir string) (string, string, error) {
+	if _, err := exec.LookPath("HandBrakeCLI"); err != nil {
+		return "", "", fmt.Errorf("program HandBrakeCLI neni nainstalovany (na Debianu/Ubuntu nainstaluj balicek handbrake-cli)")
+	}
+
+	selectedSource, err := chooseDVDSource(reader, source)
+	if err != nil {
+		return "", "", err
+	}
+
+	fmt.Println()
+	fmt.Println("Prohledavam DVD, muze to chvili trvat...")
+	titles, scanOutput, err := scanDVDTitles(selectedSource)
+	if err != nil {
+		return "", "", err
+	}
+	if len(titles) == 0 {
+		return "", "", fmt.Errorf("HandBrake na zdroji %q nenasel zadny DVD titul%s", selectedSource, commandOutputSuffix(scanOutput))
+	}
+
+	printDVDTitles(titles)
+	selectedTitle, err := chooseDVDTitle(reader, titles)
+	if err != nil {
+		return "", "", err
+	}
+	selectedAudio, err := chooseDVDAudioTrack(reader, selectedTitle.AudioTracks)
+	if err != nil {
+		return "", "", err
+	}
+
+	baseName := fmt.Sprintf("dvd-title-%02d", selectedTitle.Number)
+	videoPath := filepath.Join(workDir, baseName+".mp4")
+	mp3Path := filepath.Join(workDir, baseName+".mp3")
+
+	if err := encodeDVDTitle(selectedSource, selectedTitle.Number, selectedAudio, videoPath); err != nil {
+		return "", "", err
+	}
+	if err := extractMP3(videoPath, mp3Path); err != nil {
+		return "", "", err
+	}
+
+	return videoPath, mp3Path, nil
+}
+
+func chooseDVDSource(reader *bufio.Reader, requested string) (string, error) {
+	if strings.TrimSpace(requested) != "" {
+		return validateDVDSource(strings.TrimSpace(requested))
+	}
+
+	candidates := detectDVDDrives()
+	if len(candidates) == 1 {
+		fmt.Println("Nalezena DVD mechanika:", candidates[0])
+		return candidates[0], nil
+	}
+	if len(candidates) > 1 {
+		fmt.Println("Nalezene DVD mechaniky:")
+		for i, candidate := range candidates {
+			fmt.Printf("  %d) %s\n", i+1, candidate)
+		}
+		fmt.Print("Vyber mechaniku [1]: ")
+		answer, err := readLine(reader)
+		if err != nil {
+			return "", err
+		}
+		if answer == "" {
+			return candidates[0], nil
+		}
+		choice, err := strconv.Atoi(answer)
+		if err != nil || choice < 1 || choice > len(candidates) {
+			return "", fmt.Errorf("neplatna volba mechaniky %q", answer)
+		}
+		return candidates[choice-1], nil
+	}
+
+	fmt.Print("Zadej cestu k DVD mechanice, ISO souboru nebo slozce VIDEO_TS: ")
+	answer, err := readLine(reader)
+	if err != nil {
+		return "", err
+	}
+	if answer == "" {
+		return "", fmt.Errorf("nebyla zadana cesta k DVD")
+	}
+	return validateDVDSource(answer)
+}
+
+func validateDVDSource(source string) (string, error) {
+	cleaned := filepath.Clean(source)
+	if _, err := os.Stat(cleaned); err != nil {
+		return "", fmt.Errorf("DVD zdroj %q nelze otevrit: %w", cleaned, err)
+	}
+	return cleaned, nil
+}
+
+func detectDVDDrives() []string {
+	patterns := []string{"/dev/dvd", "/dev/cdrom", "/dev/sr*"}
+	seen := make(map[string]bool)
+	var candidates []string
+
+	for _, pattern := range patterns {
+		matches, _ := filepath.Glob(pattern)
+		for _, match := range matches {
+			if _, err := os.Stat(match); err != nil {
+				continue
+			}
+			canonical := match
+			if resolved, err := filepath.EvalSymlinks(match); err == nil {
+				canonical = resolved
+			}
+			if seen[canonical] {
+				continue
+			}
+			seen[canonical] = true
+			candidates = append(candidates, match)
+		}
+	}
+
+	return candidates
+}
+
+func scanDVDTitles(source string) ([]dvdTitle, string, error) {
+	cmd := exec.Command("HandBrakeCLI", "--scan", "-t", "0", "-i", source)
+	output, err := cmd.CombinedOutput()
+	outputText := string(output)
+	if err != nil {
+		return nil, outputText, fmt.Errorf("sken DVD selhal: %w%s", err, commandOutputSuffix(outputText))
+	}
+
+	return parseDVDScan(outputText), outputText, nil
+}
+
+func parseDVDScan(output string) []dvdTitle {
+	var titles []dvdTitle
+	currentTitle := -1
+	inAudioTracks := false
+
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		var number int
+		if _, err := fmt.Sscanf(line, "+ title %d:", &number); err == nil {
+			titles = append(titles, dvdTitle{Number: number})
+			currentTitle = len(titles) - 1
+			inAudioTracks = false
+			continue
+		}
+		if currentTitle < 0 {
+			continue
+		}
+
+		if strings.HasPrefix(line, "+ duration:") {
+			durationText := strings.TrimSpace(strings.TrimPrefix(line, "+ duration:"))
+			if duration, err := parseClockDuration(durationText); err == nil {
+				titles[currentTitle].Duration = duration
+			}
+			continue
+		}
+		if line == "+ audio tracks:" {
+			inAudioTracks = true
+			continue
+		}
+		if strings.HasPrefix(line, "+ subtitle tracks:") || strings.HasPrefix(line, "+ chapters:") {
+			inAudioTracks = false
+			continue
+		}
+		if inAudioTracks {
+			track, ok := parseDVDAudioTrack(line)
+			if ok {
+				titles[currentTitle].AudioTracks = append(titles[currentTitle].AudioTracks, track)
+			}
+		}
+	}
+
+	return titles
+}
+
+func parseClockDuration(value string) (time.Duration, error) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 3 {
+		return 0, fmt.Errorf("neplatna delka %q", value)
+	}
+	hours, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, err
+	}
+	minutes, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, err
+	}
+	seconds, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second, nil
+}
+
+func parseDVDAudioTrack(line string) (dvdAudioTrack, bool) {
+	if !strings.HasPrefix(line, "+ ") {
+		return dvdAudioTrack{}, false
+	}
+	line = strings.TrimPrefix(line, "+ ")
+	comma := strings.Index(line, ",")
+	if comma < 1 {
+		return dvdAudioTrack{}, false
+	}
+	number, err := strconv.Atoi(strings.TrimSpace(line[:comma]))
+	if err != nil {
+		return dvdAudioTrack{}, false
+	}
+	return dvdAudioTrack{Number: number, Description: strings.TrimSpace(line[comma+1:])}, true
+}
+
+func printDVDTitles(titles []dvdTitle) {
+	defaultTitle := longestDVDTitle(titles)
+	fmt.Println()
+	fmt.Println("Nalezene DVD tituly:")
+	for _, title := range titles {
+		marker := ""
+		if title.Number == defaultTitle.Number {
+			marker = "  [pravdepodobne hlavni film]"
+		}
+		fmt.Printf("  %d) %s%s\n", title.Number, formatDuration(title.Duration), marker)
+	}
+}
+
+func chooseDVDTitle(reader *bufio.Reader, titles []dvdTitle) (dvdTitle, error) {
+	defaultTitle := longestDVDTitle(titles)
+	fmt.Printf("Vyber cislo DVD titulu [%d]: ", defaultTitle.Number)
+	answer, err := readLine(reader)
+	if err != nil {
+		return dvdTitle{}, err
+	}
+	if answer == "" {
+		return defaultTitle, nil
+	}
+
+	selectedNumber, err := strconv.Atoi(answer)
+	if err != nil {
+		return dvdTitle{}, fmt.Errorf("neplatne cislo DVD titulu %q", answer)
+	}
+	for _, title := range titles {
+		if title.Number == selectedNumber {
+			return title, nil
+		}
+	}
+	return dvdTitle{}, fmt.Errorf("DVD titul %d nebyl pri skenu nalezen", selectedNumber)
+}
+
+func chooseDVDAudioTrack(reader *bufio.Reader, tracks []dvdAudioTrack) (int, error) {
+	if len(tracks) == 0 {
+		fmt.Println("Sken nevypsal zvukove stopy, HandBrake pouzije prvni dostupnou stopu.")
+		return 0, nil
+	}
+
+	fmt.Println("Zvukove stopy vybraneho titulu:")
+	for _, track := range tracks {
+		fmt.Printf("  %d) %s\n", track.Number, track.Description)
+	}
+	fmt.Printf("Vyber zvukovou stopu [%d]: ", tracks[0].Number)
+	answer, err := readLine(reader)
+	if err != nil {
+		return 0, err
+	}
+	if answer == "" {
+		return tracks[0].Number, nil
+	}
+
+	selectedNumber, err := strconv.Atoi(answer)
+	if err != nil {
+		return 0, fmt.Errorf("neplatne cislo zvukove stopy %q", answer)
+	}
+	for _, track := range tracks {
+		if track.Number == selectedNumber {
+			return selectedNumber, nil
+		}
+	}
+	return 0, fmt.Errorf("zvukova stopa %d nebyla u vybraneho titulu nalezena", selectedNumber)
+}
+
+func longestDVDTitle(titles []dvdTitle) dvdTitle {
+	longest := titles[0]
+	for _, title := range titles[1:] {
+		if title.Duration > longest.Duration {
+			longest = title
+		}
+	}
+	return longest
+}
+
+func formatDuration(duration time.Duration) string {
+	seconds := int64(duration / time.Second)
+	return fmt.Sprintf("%02d:%02d:%02d", seconds/3600, (seconds/60)%60, seconds%60)
+}
+
+func encodeDVDTitle(source string, titleNumber int, audioTrack int, outputPath string) error {
+	fmt.Println()
+	fmt.Printf("Prevadim DVD titul %d do MP4...\n", titleNumber)
+
+	args := []string{
+		"-i", source,
+		"-t", strconv.Itoa(titleNumber),
+		"-o", outputPath,
+		"-f", "av_mp4",
+		"-e", "x264",
+		"-q", "20",
+		"--encoder-preset", "medium",
+		"-E", "av_aac",
+		"-B", "160",
+		"--mixdown", "stereo",
+		"--markers",
+		"--optimize",
+	}
+	if audioTrack > 0 {
+		args = append(args, "-a", strconv.Itoa(audioTrack))
+	}
+
+	cmd := exec.Command("HandBrakeCLI", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("prevod DVD do MP4 selhal: %w", err)
+	}
+	if !fileExists(outputPath) {
+		return fmt.Errorf("HandBrake skoncil bez chyby, ale nevytvoril %q", outputPath)
+	}
+	return nil
+}
+
+func extractMP3(videoPath string, outputPath string) error {
+	fmt.Println()
+	fmt.Println("Vytvarim MP3 pro prepis...")
+
+	cmd := exec.Command(
+		"ffmpeg",
+		"-y",
+		"-i", videoPath,
+		"-vn",
+		"-ac", "1",
+		"-ar", "16000",
+		"-b:a", "64k",
+		outputPath,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("vytvoreni MP3 selhalo: %w", err)
+	}
+	return nil
+}
+
+func readLine(reader *bufio.Reader) (string, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func commandOutputSuffix(output string) string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return ""
+	}
+	const maxLength = 4000
+	if len(trimmed) > maxLength {
+		trimmed = trimmed[len(trimmed)-maxLength:]
+	}
+	return "\nPosledni vystup HandBrake:\n" + trimmed
+}
+
+func createEnglishVTT(apiKey string, mp3Path string, outputPath string, localWhisper bool) error {
+	if localWhisper {
+		return createEnglishVTTLocal(mp3Path, outputPath)
+	}
+	return createEnglishVTTCloud(apiKey, mp3Path, outputPath)
+}
+
+func createEnglishVTTLocal(mp3Path string, outputPath string) error {
+	fmt.Println()
+	fmt.Println("Vytvarim anglicke VTT titulky lokalne pres whisper.cpp, Silero VAD a DTW...")
+
+	config := localwhisper.DefaultConfig(mp3Path, outputPath)
+	config.Language = "en"
+	config.Threads = 1
+	if err := localwhisper.Transcribe(context.Background(), config); err != nil {
+		return fmt.Errorf("lokalni prepis pres Whisper selhal: %w", err)
+	}
+	if !fileExists(outputPath) {
+		return fmt.Errorf("lokalni Whisper skoncil bez chyby, ale nevytvoril %q", outputPath)
+	}
+	return nil
+}
+
+func createEnglishVTTCloud(apiKey string, mp3Path string, outputPath string) error {
+	fmt.Println()
+	fmt.Println("Vytvarim anglicke VTT titulky pres OpenAI Whisper...")
 
 	transcriptionAudioPath, err := prepareTranscriptionAudio(mp3Path)
 	if err != nil {
@@ -265,6 +1055,11 @@ func prepareTranscriptionAudio(mp3Path string) (string, error) {
 	)
 
 	outputPath := replaceExtension(mp3Path, ".whisper.mp3")
+	if outputInfo, err := os.Stat(outputPath); err == nil && outputInfo.Size() > 0 && outputInfo.Size() <= maxTranscriptionBytes {
+		fmt.Println("Audio pro Whisper uz existuje, pouzivam:", outputPath)
+		return outputPath, nil
+	}
+
 	bitrates := []string{"32k", "24k", "16k"}
 
 	for _, bitrate := range bitrates {
@@ -426,10 +1221,49 @@ func burnSubtitles(videoPath string, subtitlesPath string, outputPath string) er
 	fmt.Println()
 	fmt.Println("Vypaluji ceske titulky do videa...")
 
+	workDir := filepath.Dir(subtitlesPath)
+	temporarySubtitles, err := os.CreateTemp(workDir, ".vtt-cz-subtitles-*.vtt")
+	if err != nil {
+		return err
+	}
+	temporarySubtitlesPath := temporarySubtitles.Name()
+	defer os.Remove(temporarySubtitlesPath)
+
+	subtitles, err := os.Open(subtitlesPath)
+	if err != nil {
+		temporarySubtitles.Close()
+		return err
+	}
+	if _, err := io.Copy(temporarySubtitles, subtitles); err != nil {
+		subtitles.Close()
+		temporarySubtitles.Close()
+		return err
+	}
+	if err := subtitles.Close(); err != nil {
+		temporarySubtitles.Close()
+		return err
+	}
+	if err := temporarySubtitles.Close(); err != nil {
+		return err
+	}
+
+	temporaryOutput, err := os.CreateTemp(filepath.Dir(outputPath), ".vtt-cz-output-*.mp4")
+	if err != nil {
+		return err
+	}
+	temporaryOutputPath := temporaryOutput.Name()
+	if err := temporaryOutput.Close(); err != nil {
+		return err
+	}
+	if err := os.Remove(temporaryOutputPath); err != nil {
+		return err
+	}
+	defer os.Remove(temporaryOutputPath)
+
 	style := "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H40000000,BackColour=&H80000000,BorderStyle=3,Outline=4,Shadow=0,Alignment=2,MarginV=50"
 	filter := fmt.Sprintf(
 		"subtitles=filename=%s:force_style=%s",
-		quoteFilterValue(subtitlesPath),
+		filepath.Base(temporarySubtitlesPath),
 		quoteFilterValue(style),
 	)
 
@@ -455,19 +1289,41 @@ func burnSubtitles(videoPath string, subtitlesPath string, outputPath string) er
 		"20",
 		"-c:a",
 		"copy",
-		outputPath,
+		temporaryOutputPath,
 	)
 
+	cmd.Dir = workDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	return os.Rename(temporaryOutputPath, outputPath)
 }
 
 func printUsage() {
 	fmt.Println("Pouziti:")
-	fmt.Println("  go run .")
-	fmt.Println("  go run . \"URL_VIDEA\"")
+	fmt.Println("  vtt-cz")
+	fmt.Println("  vtt-cz \"URL_VIDEA\"")
+	fmt.Println("  vtt-cz --local-whisper [\"URL_VIDEA\"]")
+	fmt.Println("  vtt-cz --work [\"URL_VIDEA\"]")
+	fmt.Println("  vtt-cz --dvd")
+	fmt.Println("  vtt-cz --dvd \"/cesta/k/DVD_nebo_ISO\"")
+	fmt.Println("  vtt-cz --local-whisper --dvd [\"/cesta/k/DVD_nebo_ISO\"]")
+	fmt.Println("  vtt-cz --work --dvd [\"/cesta/k/DVD_nebo_ISO\"]")
+}
+
+func executableCommand(arguments ...string) string {
+	executable := "vtt-cz"
+	if path, err := os.Executable(); err == nil && !strings.Contains(path, string(filepath.Separator)+"go-build") {
+		executable = strconv.Quote(path)
+	}
+	if len(arguments) == 0 {
+		return executable
+	}
+	return executable + " " + strings.Join(arguments, " ")
 }
 
 func cleanURL(input string) string {

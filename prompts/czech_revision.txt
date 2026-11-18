@@ -2,31 +2,52 @@ Zkontroluj a jazykove uprav cesky soubor titulku VTT.
 
 Vrat pouze obsah vysledneho VTT souboru. Nepridavej komentare, vysvetleni ani Markdown.
 
-Zachovej presne:
-- puvodni format VTT,
-- vsechny casove znacky,
-- pocet bloku,
-- poradi bloku,
-- prazdne radky mezi bloky.
+Uprav cestinu tak, aby byla prirozena, titulkova a dobre citelna. Zachovej vyznam, poradi a uplnost puvodniho ceskeho textu. Nic nevynechavej, neopakuj ani nepridavej.
 
-Uprav cestinu tak, aby byla prirozena, titulkova a dobre citelna. Zachovej vyznam originalniho ceskeho textu.
+Konec vety je pevna hranice titulkoveho bloku:
+- jakmile veta skonci koncovou teckou, otaznikem nebo vykricnikem, ukonci na stejnem miste i dany titulkovy blok,
+- za ukoncenou vetu uz do stejneho bloku nedavej zadne slovo nasledujici vety,
+- nasledujici veta musi zacit v novem titulkovem bloku,
+- toto pravidlo plati i pro velmi kratkou vetu, treba jen o trech slovech; nepridavej k ni zacatek dalsi vety jen proto, aby byl blok delsi,
+- tecku v bezne zkratce, desetinnem cisle nebo podobnem vyrazu nepovazuj za konec vety.
 
-Zvlaste opravuj spatne rozdeleni vet mezi sousednimi titulkovymi bloky. Pokud dalsi blok zacina kratkym dokoncovacim fragmentem predchozi vety, typicky 1 az 3 slovy jako "stava.", "udelali.", "je to.", muzes tento fragment presunout na konec predchoziho bloku a dalsi blok zacit az nasledujici vetou.
+Kvuli tomuto pravidlu smis zmenit rozdeleni textu mezi bezprostredne sousedicimi bloky, pocet bloku a jejich casove znacky. Dlouha veta muze pokracovat pres vice bloku, ale blok, ve kterem veta skonci, musi skoncit stejnym interpunkcnim znamenkem. Pokud po tomto znamenku puvodne zacinala dalsi veta, presun jeji zacatek do noveho nebo nasledujiciho bloku.
+
+Casovani uprav primerene mluvenemu textu:
+- zachovej pocatecni cas prvniho dotceneho bloku a koncovy cas posledniho dotceneho bloku,
+- nove hranice mezi dotcenymi bloky odhadni pomerne podle mnozstvi a delky slov na obou stranach hranice,
+- casove znacky musi jit vzdy dopredu, nesmi se prekryvat a text musi zustat ve stejnem poradi,
+- casy bloku, jejichz textove rozdeleni se nemeni, ponech beze zmeny,
+- nevytvarej prazdne bloky; pokud po presunu textu blok zustane prazdny, odstran ho.
+
+Priklad spatne:
+00:00:10.000 --> 00:00:14.000
+To je vse. Ted se
+
+00:00:14.000 --> 00:00:18.000
+podivame dal.
+
+Priklad lepe:
+00:00:10.000 --> 00:00:12.000
+To je vse.
+
+00:00:12.000 --> 00:00:18.000
+Ted se podivame dal.
+
+Zvlaste opravuj i opacne spatne rozdeleni, kdy nasledujici blok zacina kratkym dokoncenim predchozi vety a hned za nim zacina nova veta.
 
 Priklad spatne:
 00:01:17.360 --> 00:01:23.680
-Co jsi tim myslel? Myslim, ze jsme jako firma zjevne udelali par kroku vedle, coz se obcas
+Myslim, ze se to obcas
 
 00:01:23.680 --> 00:01:27.519
-stava. Cast toho, kdyz delate portfolio sazek, je, ze nekdy jich vic
+stava. Ted se podivame na dalsi priklad.
 
 Priklad lepe:
-00:01:17.360 --> 00:01:23.680
-Co jsi tim myslel? Myslim, ze jsme jako firma zjevne udelali par kroku vedle, coz se obcas stava.
+00:01:17.360 --> 00:01:24.600
+Myslim, ze se to obcas stava.
 
-00:01:23.680 --> 00:01:27.519
-Cast toho, kdyz delate portfolio sazek, je, ze nekdy jich vic
+00:01:24.600 --> 00:01:27.519
+Ted se podivame na dalsi priklad.
 
-Tento presun delej pouze mezi bezprostredne sousedicimi bloky a pouze pro kratke fragmenty, ktere zjevne dokoncuji predchozi vetu. Jinak nepresouvej vyznam mezi bloky.
-
-Nemen casove znacky. Nemen pocet bloku. Nevytvarej prazdne bloky. Neslucuj bloky. Nerozdeluj bloky.
+Pred vracenim vysledku zkontroluj, ze zadny blok neobsahuje za koncem jedne vety zacatek dalsi vety a ze VTT zustava syntakticky platne.
