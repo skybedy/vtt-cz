@@ -17,6 +17,7 @@ func TestParseArguments(t *testing.T) {
 		wantInput string
 		wantLocal bool
 		wantWork  bool
+		wantReel  bool
 		wantError bool
 	}{
 		{name: "interactive URL", wantMode: "url"},
@@ -25,6 +26,8 @@ func TestParseArguments(t *testing.T) {
 		{name: "local Whisper URL", args: []string{"--local-whisper", "https://example.com/video"}, wantMode: "url", wantInput: "https://example.com/video", wantLocal: true},
 		{name: "Work interactive URL", args: []string{"--work"}, wantMode: "url", wantWork: true},
 		{name: "Work URL", args: []string{"--work", "https://example.com/video"}, wantMode: "url", wantInput: "https://example.com/video", wantWork: true},
+		{name: "Reel URL", args: []string{"--reel", "https://example.com/video"}, wantMode: "url", wantInput: "https://example.com/video", wantReel: true},
+		{name: "Work Reel", args: []string{"--work", "--reel"}, wantMode: "url", wantWork: true, wantReel: true},
 		{name: "detected DVD", args: []string{"--dvd"}, wantMode: "dvd"},
 		{name: "explicit DVD", args: []string{"--dvd", "/dev/sr0"}, wantMode: "dvd", wantInput: "/dev/sr0"},
 		{name: "local Whisper DVD", args: []string{"--local-whisper", "--dvd", "/dev/sr0"}, wantMode: "dvd", wantInput: "/dev/sr0", wantLocal: true},
@@ -34,26 +37,29 @@ func TestParseArguments(t *testing.T) {
 		{name: "too many arguments", args: []string{"one", "two"}, wantError: true},
 		{name: "duplicate local Whisper", args: []string{"--local-whisper", "--local-whisper"}, wantError: true},
 		{name: "duplicate Work", args: []string{"--work", "--work"}, wantError: true},
+		{name: "duplicate Reel", args: []string{"--reel", "--reel"}, wantError: true},
 		{name: "Work and local Whisper", args: []string{"--work", "--local-whisper"}, wantError: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mode, input, localWhisper, workMode, err := parseArguments(test.args)
+			mode, input, localWhisper, workMode, reelMode, err := parseArguments(test.args)
 			if (err != nil) != test.wantError {
 				t.Fatalf("parseArguments() error = %v, wantError %v", err, test.wantError)
 			}
-			if mode != test.wantMode || input != test.wantInput || localWhisper != test.wantLocal || workMode != test.wantWork {
+			if mode != test.wantMode || input != test.wantInput || localWhisper != test.wantLocal || workMode != test.wantWork || reelMode != test.wantReel {
 				t.Fatalf(
-					"parseArguments() = (%q, %q, %v, %v), want (%q, %q, %v, %v)",
+					"parseArguments() = (%q, %q, %v, %v, %v), want (%q, %q, %v, %v, %v)",
 					mode,
 					input,
 					localWhisper,
 					workMode,
+					reelMode,
 					test.wantMode,
 					test.wantInput,
 					test.wantLocal,
 					test.wantWork,
+					test.wantReel,
 				)
 			}
 		})
@@ -143,7 +149,7 @@ func TestRunWorkModeWaitsForCzechVTT(t *testing.T) {
 		}
 	}
 
-	if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath); err != nil {
+	if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath, true); err != nil {
 		t.Fatalf("runWorkMode() error = %v", err)
 	}
 	instructionsPath := filepath.Join(workDir, "CHATGPT-WORK.txt")
@@ -151,7 +157,7 @@ func TestRunWorkModeWaitsForCzechVTT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(instructions), rawEnVTTPath) || !strings.Contains(string(instructions), csVTTPath) {
+	if !strings.Contains(string(instructions), rawEnVTTPath) || !strings.Contains(string(instructions), csVTTPath) || !strings.Contains(string(instructions), "--work --reel") {
 		t.Fatalf("Work instructions do not contain handoff paths:\n%s", instructions)
 	}
 }
@@ -176,8 +182,17 @@ func TestRunWorkModeAcceptsCompletedCzechVTT(t *testing.T) {
 		}
 	}
 
-	if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath); err != nil {
+	if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath, false); err != nil {
 		t.Fatalf("runWorkMode() error = %v", err)
+	}
+}
+
+func TestSubtitleBurnStyle(t *testing.T) {
+	if style := subtitleBurnStyle(false); !strings.Contains(style, "FontSize=16") || !strings.Contains(style, "Outline=4") {
+		t.Fatalf("standard subtitle style = %q", style)
+	}
+	if style := subtitleBurnStyle(true); !strings.Contains(style, "FontSize=9") || !strings.Contains(style, "Outline=2") || !strings.Contains(style, "MarginV=28") {
+		t.Fatalf("Reel subtitle style = %q", style)
 	}
 }
 

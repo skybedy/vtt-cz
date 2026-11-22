@@ -60,6 +60,19 @@ URL lze zadat rovnou:
 ./bin/vtt-cz "https://www.youtube.com/watch?v=..."
 ```
 
+## Vertikalni video / Reel
+
+Pro vertikalni video ve formatu Reel pridej prepinac `--reel`. Titulky se
+vypali mensim pismem, s mensim obrysem a odpovidajicim spodnim odsazenim, aby
+na vysoke 9:16 plose nezabiraly neprimerene velkou cast obrazu:
+
+```bash
+./bin/vtt-cz --work --reel "https://www.facebook.com/reel/..."
+```
+
+Volbu lze kombinovat take s beznym cloudovym rezimem, `--local-whisper` nebo
+`--dvd`. Program si ji v pracovni slozce zapamatuje i pro pozdejsi pokracovani.
+
 ## Lokalni Whisper
 
 Pokud nechces posilat audio do placeneho OpenAI Whisper API, pridej prepinac

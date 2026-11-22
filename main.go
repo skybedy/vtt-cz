@@ -25,6 +25,8 @@ const (
 	openAITranscriptionsURL = "https://api.openai.com/v1/audio/transcriptions"
 	openAIResponsesURL      = "https://api.openai.com/v1/responses"
 	maxTranscriptionBytes   = 25 * 1024 * 1024
+	standardSubtitleStyle   = "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H40000000,BackColour=&H80000000,BorderStyle=3,Outline=4,Shadow=0,Alignment=2,MarginV=50"
+	reelSubtitleStyle       = "FontSize=9,PrimaryColour=&H00FFFFFF,OutlineColour=&H40000000,BackColour=&H80000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=28"
 )
 
 //go:embed prompts/czech_translation.txt
@@ -42,7 +44,7 @@ func main() {
 		return
 	}
 
-	mode, input, localWhisper, workMode, err := parseArguments(os.Args[1:])
+	mode, input, localWhisper, workMode, reelMode, err := parseArguments(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba:", err)
 		printUsage()
@@ -75,7 +77,6 @@ func main() {
 				os.Exit(1)
 			}
 		}
-
 		switch mode {
 		case "dvd":
 			videoPath, mp3Path, err = importDVD(reader, input, workDir)
@@ -88,6 +89,14 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	reelMarkerPath := filepath.Join(workDir, ".reel-mode")
+	if reelMode && !fileExists(reelMarkerPath) {
+		if err := os.WriteFile(reelMarkerPath, []byte("reel\n"), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "Chyba pri oznaceni Reel ulohy:", err)
+			os.Exit(1)
+		}
+	}
+	reelMode = reelMode || fileExists(reelMarkerPath)
 
 	rawEnVTTPath := replaceExtension(videoPath, ".en.raw.vtt")
 	enVTTPath := replaceExtension(videoPath, ".en.vtt")
@@ -95,7 +104,7 @@ func main() {
 	csVTTPath := replaceExtension(videoPath, ".cs.vtt")
 	outputVideoPath := replaceExtension(videoPath, ".cs.mp4")
 	if workMode {
-		if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath); err != nil {
+		if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath, reelMode); err != nil {
 			fmt.Fprintln(os.Stderr, "Chyba v rezimu ChatGPT Work:", err)
 			os.Exit(1)
 		}
@@ -131,7 +140,7 @@ func main() {
 	}
 
 	if err := runUnlessFileExists(outputVideoPath, "Video s ceskymi titulky uz existuje, preskakuji tento krok.", func() error {
-		return burnSubtitles(videoPath, csVTTPath, outputVideoPath)
+		return burnSubtitles(videoPath, csVTTPath, outputVideoPath, reelMode)
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba pri vypalovani titulku:", err)
 		os.Exit(1)
@@ -153,44 +162,50 @@ func wantsHelp(args []string) bool {
 	return len(args) == 1 && (args[0] == "-h" || args[0] == "--help")
 }
 
-func parseArguments(args []string) (string, string, bool, bool, error) {
+func parseArguments(args []string) (string, string, bool, bool, bool, error) {
 	mode := "url"
 	input := ""
 	localWhisper := false
 	workMode := false
+	reelMode := false
 
 	for _, arg := range args {
 		switch arg {
 		case "--dvd":
 			if mode == "dvd" {
-				return "", "", false, false, fmt.Errorf("prepinac --dvd je zadan vicekrat")
+				return "", "", false, false, false, fmt.Errorf("prepinac --dvd je zadan vicekrat")
 			}
 			mode = "dvd"
 		case "--local-whisper":
 			if localWhisper {
-				return "", "", false, false, fmt.Errorf("prepinac --local-whisper je zadan vicekrat")
+				return "", "", false, false, false, fmt.Errorf("prepinac --local-whisper je zadan vicekrat")
 			}
 			localWhisper = true
 		case "--work":
 			if workMode {
-				return "", "", false, false, fmt.Errorf("prepinac --work je zadan vicekrat")
+				return "", "", false, false, false, fmt.Errorf("prepinac --work je zadan vicekrat")
 			}
 			workMode = true
+		case "--reel":
+			if reelMode {
+				return "", "", false, false, false, fmt.Errorf("prepinac --reel je zadan vicekrat")
+			}
+			reelMode = true
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return "", "", false, false, fmt.Errorf("neznamy prepinac %q", arg)
+				return "", "", false, false, false, fmt.Errorf("neznamy prepinac %q", arg)
 			}
 			if input != "" {
-				return "", "", false, false, fmt.Errorf("lze zadat nejvyse jednu URL nebo cestu k DVD")
+				return "", "", false, false, false, fmt.Errorf("lze zadat nejvyse jednu URL nebo cestu k DVD")
 			}
 			input = arg
 		}
 	}
 	if localWhisper && workMode {
-		return "", "", false, false, fmt.Errorf("--work uz lokalni Whisper zapina; nepouzivej soucasne --local-whisper")
+		return "", "", false, false, false, fmt.Errorf("--work uz lokalni Whisper zapina; nepouzivej soucasne --local-whisper")
 	}
 
-	return mode, input, localWhisper, workMode, nil
+	return mode, input, localWhisper, workMode, reelMode, nil
 }
 
 func readURL(reader *bufio.Reader, initialURL string) string {
@@ -339,7 +354,7 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir() && info.Size() > 0
 }
 
-func runWorkMode(workDir string, videoPath string, mp3Path string, rawEnVTTPath string, csVTTPath string, outputVideoPath string) error {
+func runWorkMode(workDir string, videoPath string, mp3Path string, rawEnVTTPath string, csVTTPath string, outputVideoPath string, reelMode bool) error {
 	if err := runUnlessFileExists(rawEnVTTPath, "Lokalni anglicke titulky uz existuji, preskakuji prepis.", func() error {
 		return createEnglishVTTLocal(mp3Path, rawEnVTTPath)
 	}); err != nil {
@@ -348,7 +363,11 @@ func runWorkMode(workDir string, videoPath string, mp3Path string, rawEnVTTPath 
 
 	if !fileExists(csVTTPath) {
 		instructionsPath := filepath.Join(workDir, "CHATGPT-WORK.txt")
-		resumeCommand := executableCommand("--work")
+		resumeArguments := []string{"--work"}
+		if reelMode {
+			resumeArguments = append(resumeArguments, "--reel")
+		}
+		resumeCommand := executableCommand(resumeArguments...)
 		instructions := fmt.Sprintf(
 			"CHATGPT WORK - DOKONCENI TITULKU\n\n"+
 				"1. V ChatGPT Work vyber plugin @VTT CZ Subtitle Workflow.\n"+
@@ -378,7 +397,7 @@ func runWorkMode(workDir string, videoPath string, mp3Path string, rawEnVTTPath 
 		return fmt.Errorf("vracene ceske VTT neni platne: %w", err)
 	}
 	if err := runUnlessFileExists(outputVideoPath, "Video s ceskymi titulky uz existuje, preskakuji vypalovani.", func() error {
-		return burnSubtitles(videoPath, csVTTPath, outputVideoPath)
+		return burnSubtitles(videoPath, csVTTPath, outputVideoPath, reelMode)
 	}); err != nil {
 		return fmt.Errorf("vypalovani titulku: %w", err)
 	}
@@ -1217,7 +1236,7 @@ func askGPT(apiKey string, input []byte, prompt string) (string, error) {
 	return responseOutputText(responseBody)
 }
 
-func burnSubtitles(videoPath string, subtitlesPath string, outputPath string) error {
+func burnSubtitles(videoPath string, subtitlesPath string, outputPath string, reelMode bool) error {
 	fmt.Println()
 	fmt.Println("Vypaluji ceske titulky do videa...")
 
@@ -1260,7 +1279,7 @@ func burnSubtitles(videoPath string, subtitlesPath string, outputPath string) er
 	}
 	defer os.Remove(temporaryOutputPath)
 
-	style := "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H40000000,BackColour=&H80000000,BorderStyle=3,Outline=4,Shadow=0,Alignment=2,MarginV=50"
+	style := subtitleBurnStyle(reelMode)
 	filter := fmt.Sprintf(
 		"subtitles=filename=%s:force_style=%s",
 		filepath.Base(temporarySubtitlesPath),
@@ -1303,12 +1322,21 @@ func burnSubtitles(videoPath string, subtitlesPath string, outputPath string) er
 	return os.Rename(temporaryOutputPath, outputPath)
 }
 
+func subtitleBurnStyle(reelMode bool) string {
+	if reelMode {
+		return reelSubtitleStyle
+	}
+	return standardSubtitleStyle
+}
+
 func printUsage() {
 	fmt.Println("Pouziti:")
 	fmt.Println("  vtt-cz")
 	fmt.Println("  vtt-cz \"URL_VIDEA\"")
 	fmt.Println("  vtt-cz --local-whisper [\"URL_VIDEA\"]")
+	fmt.Println("  vtt-cz --reel [\"URL_VIDEA\"]")
 	fmt.Println("  vtt-cz --work [\"URL_VIDEA\"]")
+	fmt.Println("  vtt-cz --work --reel [\"URL_VIDEA\"]")
 	fmt.Println("  vtt-cz --dvd")
 	fmt.Println("  vtt-cz --dvd \"/cesta/k/DVD_nebo_ISO\"")
 	fmt.Println("  vtt-cz --local-whisper --dvd [\"/cesta/k/DVD_nebo_ISO\"]")
