@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,7 @@ func TestParseArguments(t *testing.T) {
 		wantReel     bool
 		wantEmail    bool
 		wantListener bool
+		wantDoctor   bool
 		wantError    bool
 	}{
 		{name: "interactive URL", wantMode: "url"},
@@ -32,6 +34,8 @@ func TestParseArguments(t *testing.T) {
 		{name: "Work Reel", args: []string{"--work", "--reel"}, wantMode: "url", wantWork: true, wantReel: true},
 		{name: "Work email", args: []string{"--work", "--email", "https://example.com/video"}, wantMode: "url", wantInput: "https://example.com/video", wantWork: true, wantEmail: true},
 		{name: "email listener", args: []string{"--email-listen"}, wantMode: "url", wantListener: true},
+		{name: "doctor Work email", args: []string{"--doctor", "--work", "--email"}, wantMode: "url", wantWork: true, wantEmail: true, wantDoctor: true},
+		{name: "doctor listener", args: []string{"--doctor", "--email-listen"}, wantMode: "url", wantListener: true, wantDoctor: true},
 		{name: "detected DVD", args: []string{"--dvd"}, wantMode: "dvd"},
 		{name: "explicit DVD", args: []string{"--dvd", "/dev/sr0"}, wantMode: "dvd", wantInput: "/dev/sr0"},
 		{name: "local Whisper DVD", args: []string{"--local-whisper", "--dvd", "/dev/sr0"}, wantMode: "dvd", wantInput: "/dev/sr0", wantLocal: true},
@@ -43,6 +47,8 @@ func TestParseArguments(t *testing.T) {
 		{name: "duplicate Work", args: []string{"--work", "--work"}, wantError: true},
 		{name: "duplicate Reel", args: []string{"--reel", "--reel"}, wantError: true},
 		{name: "duplicate email", args: []string{"--email", "--email"}, wantError: true},
+		{name: "duplicate doctor", args: []string{"--doctor", "--doctor"}, wantError: true},
+		{name: "doctor with input", args: []string{"--doctor", "https://example.com/video"}, wantError: true},
 		{name: "email without Work", args: []string{"--email"}, wantError: true},
 		{name: "email listener with Work", args: []string{"--email-listen", "--work"}, wantError: true},
 		{name: "email listener with input", args: []string{"--email-listen", "https://example.com/video"}, wantError: true},
@@ -55,9 +61,9 @@ func TestParseArguments(t *testing.T) {
 			if (err != nil) != test.wantError {
 				t.Fatalf("parseArguments() error = %v, wantError %v", err, test.wantError)
 			}
-			if options.mode != test.wantMode || options.input != test.wantInput || options.localWhisper != test.wantLocal || options.workMode != test.wantWork || options.reelMode != test.wantReel || options.emailMode != test.wantEmail || options.emailListener != test.wantListener {
+			if options.mode != test.wantMode || options.input != test.wantInput || options.localWhisper != test.wantLocal || options.workMode != test.wantWork || options.reelMode != test.wantReel || options.emailMode != test.wantEmail || options.emailListener != test.wantListener || options.doctor != test.wantDoctor {
 				t.Fatalf(
-					"parseArguments() = %#v, want mode=%q input=%q local=%v work=%v reel=%v email=%v listener=%v",
+					"parseArguments() = %#v, want mode=%q input=%q local=%v work=%v reel=%v email=%v listener=%v doctor=%v",
 					options,
 					test.wantMode,
 					test.wantInput,
@@ -66,9 +72,73 @@ func TestParseArguments(t *testing.T) {
 					test.wantReel,
 					test.wantEmail,
 					test.wantListener,
+					test.wantDoctor,
 				)
 			}
 		})
+	}
+}
+
+func TestDoctorWorkEmailEnvironment(t *testing.T) {
+	binDir := t.TempDir()
+	for _, name := range []string{"ffmpeg", "ffprobe", "nice", "ionice", "yt-dlp", "whisper-cli", "vad-speech-segments", "sendmail"} {
+		writeTestExecutable(t, filepath.Join(binDir, name), "#!/bin/sh\nexit 0\n")
+	}
+	modelDir := t.TempDir()
+	whisperModel := filepath.Join(modelDir, "whisper.bin")
+	vadModel := filepath.Join(modelDir, "vad.bin")
+	for _, path := range []string{whisperModel, vadModel} {
+		if err := os.WriteFile(path, []byte("model"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	maildir := filepath.Join(t.TempDir(), "Maildir")
+	for _, directory := range []string{"new", "cur"} {
+		if err := os.MkdirAll(filepath.Join(maildir, directory), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Setenv("PATH", binDir)
+	t.Setenv("VTT_CZ_WHISPER_BIN", filepath.Join(binDir, "whisper-cli"))
+	t.Setenv("VTT_CZ_VAD_BIN", filepath.Join(binDir, "vad-speech-segments"))
+	t.Setenv("VTT_CZ_WHISPER_MODEL", whisperModel)
+	t.Setenv("VTT_CZ_VAD_MODEL", vadModel)
+	t.Setenv("VTT_CZ_YTDLP_COOKIES_FROM_BROWSER", "none")
+	t.Setenv("VTT_CZ_EMAIL_TRANSPORT", "local")
+	t.Setenv("VTT_CZ_EMAIL_FROM", "bot@example.com")
+	t.Setenv("VTT_CZ_EMAIL_TO", "user@example.net")
+	t.Setenv("VTT_CZ_EMAIL_ALLOWED_FROM", "user@example.net")
+	t.Setenv("VTT_CZ_EMAIL_SENDMAIL", filepath.Join(binDir, "sendmail"))
+	t.Setenv("VTT_CZ_EMAIL_MAILDIR", maildir)
+
+	var output bytes.Buffer
+	if err := runDoctor(cliOptions{mode: "url", workMode: true, emailMode: true}, &output); err != nil {
+		t.Fatalf("runDoctor() error = %v\n%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "Prostredi je pro zvoleny rezim pripravene") || !strings.Contains(output.String(), "yt-dlp cookies: vypnute") {
+		t.Fatalf("doctor output = %q", output.String())
+	}
+}
+
+func TestYTDLPEnvironmentOptions(t *testing.T) {
+	t.Setenv("VTT_CZ_YTDLP_COOKIES_FROM_BROWSER", "none")
+	t.Setenv("VTT_CZ_YTDLP_AUTO_UPDATE", "false")
+	if arguments := ytDLPCookieArguments(); len(arguments) != 0 {
+		t.Fatalf("ytDLPCookieArguments() = %#v", arguments)
+	}
+	if ytDLPAutoUpdateEnabled() {
+		t.Fatal("ytDLPAutoUpdateEnabled() = true")
+	}
+
+	t.Setenv("VTT_CZ_YTDLP_COOKIES_FROM_BROWSER", "firefox:default-release")
+	t.Setenv("VTT_CZ_YTDLP_AUTO_UPDATE", "true")
+	arguments := ytDLPCookieArguments()
+	if len(arguments) != 2 || arguments[0] != "--cookies-from-browser" || arguments[1] != "firefox:default-release" {
+		t.Fatalf("ytDLPCookieArguments() = %#v", arguments)
+	}
+	if !ytDLPAutoUpdateEnabled() {
+		t.Fatal("ytDLPAutoUpdateEnabled() = false")
 	}
 }
 

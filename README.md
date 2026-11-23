@@ -8,7 +8,7 @@ Program pocita s tim, ze mas v pocitaci nainstalovane:
 - `yt-dlp`
 - `ffmpeg` a `ffprobe`
 - `HandBrakeCLI` z balicku `handbrake-cli`, pokud chces nacitat DVD
-- Firefox, ze ktereho si `yt-dlp` vezme cookies
+- Firefox, ze ktereho si `yt-dlp` ve vychozim nastaveni vezme cookies
 - `OPENAI_API_KEY` v systemovem prostredi, pokud nepouzivas rezim `--work`
 
 Go je potreba pouze pro sestaveni programu, ne pro spousteni hotove binarky.
@@ -32,6 +32,28 @@ install -m 0755 bin/vtt-cz ~/.local/bin/vtt-cz
 ```
 
 Potom staci v libovolnem adresari zadat `vtt-cz`.
+
+## Kontrola zavislosti
+
+Pred prvnim spustenim lze bez stahovani videa a bez API volani zkontrolovat
+vsechny soucasti zvoleneho workflow:
+
+```bash
+vtt-cz --doctor --work --email
+vtt-cz --doctor --email-listen
+vtt-cz --doctor --work --dvd
+```
+
+Kontrola vypise nalezene programy, Whisper/VAD binarky a modely i stav
+e-mailove konfigurace. Pri chybejici soucasti skonci nenulovym navratovym
+kodem a uvede jeji cestu nebo doporuceny balicek. Sama nespousti `sudo` ani
+neinstaluje systemove balicky.
+
+Na serveru bez profilu Firefoxu nastav
+`VTT_CZ_YTDLP_COOKIES_FROM_BROWSER=none`. Hodnota je jinak predvolene
+`firefox` a muze obsahovat i profil podporovany `yt-dlp`. Pokud je `yt-dlp`
+spravovan systemove, lze jeho pokus o vlastni aktualizaci vypnout pres
+`VTT_CZ_YTDLP_AUTO_UPDATE=false`.
 
 ## Spusteni
 
@@ -271,7 +293,7 @@ souladu s pravem platnym v miste pouziti a programu predat jeji ISO nebo
 Program postupne:
 
 1. vytvori novou pracovni slozku v systemove slozce videi,
-2. pred stahovanim zkontroluje aktualizaci `yt-dlp` pres `yt-dlp -U` a potom stahne video; pokud aktualizace kvuli siti nebo opravnenim selze, vypise varovani a zkusi pouzit stavajici verzi,
+2. pred stahovanim standardne zkontroluje aktualizaci `yt-dlp` pres `yt-dlp -U` a potom stahne video; pokud aktualizace kvuli siti nebo opravnenim selze, vypise varovani a zkusi pouzit stavajici verzi,
 3. v rezimu `--dvd` misto toho prevede vybrany DVD titul do MP4,
 4. vytvori MP3,
 5. v beznem rezimu pripadne vytvori mensi MP3 pro limit OpenAI Whisper API,

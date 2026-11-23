@@ -43,6 +43,8 @@ finální titulky do MP4. Pipeline lze po přerušení obnovit z pracovní slož
   workflow a algoritmů lokální transkripce.
 - `email.go` — MIME odeslání přes lokální sendmail nebo SMTP, Maildir/IMAP
   listener, párování odpovědí, validace českého VTT a obnova dokončení úlohy.
+- `--doctor` — read-only předletová kontrola programů, lokálních modelů a
+  e-mailového transportu pro konkrétní kombinaci režimů.
 - `deploy/` — příklady systemd user service a env souboru bez tajných hodnot.
 
 ## Datový tok a výstupy
@@ -78,6 +80,11 @@ původní zprávu. Video zůstává na VPS.
   `go vet ./...` a `go build ./...` při použití zapisovatelné Go cache v `/tmp`.
   Reálný Postfix/Maildir ani SMTP/IMAP handoff, systemd běh na VPS a
   end-to-end zpracování videa zatím ověřené nejsou.
+- Server bez browser profilu může vypnout předávání cookies do `yt-dlp` přes
+  `VTT_CZ_YTDLP_COOKIES_FROM_BROWSER=none`; systémově spravovaný `yt-dlp`
+  může vypnout vlastní aktualizaci přes `VTT_CZ_YTDLP_AUTO_UPDATE=false`.
+- Na VPS je aktivní Postfix alias `vtt-cz@timechip.cz` směrovaný do Maildiru
+  uživatele `skybedy`; binárka a systemd listener ještě nasazené nejsou.
 
 Podrobný návod pro uživatele a přesné požadavky jednotlivých režimů jsou v
 `README.md`. Aktuální práce a neověřené kroky jsou v `TODO.md`.

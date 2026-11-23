@@ -4,10 +4,9 @@ Aktualizováno: 2026-11-23
 
 ## Rozpracováno — vysoká priorita
 
-- [ ] Po schválení přidat na VPS alias `vtt-cz@timechip.cz` do lokálního
-  Maildiru uživatele `skybedy` a ověřit skutečný Postfix/Maildir handoff.
-- [ ] Nainstalovat experimentální binárku a systemd user listener na VPS;
-  ověřit restart, Maildir cursor a obnovu rozpracovaného renderingu.
+- [ ] Nainstalovat experimentální binárku a systemd listener na VPS;
+  spustit `--doctor --work --email` a ověřit restart, Maildir cursor a obnovu
+  rozpracovaného renderingu.
 - [ ] Ručně ověřit vypálení titulků pro běžné i vertikální video a pokračování
   Reel úlohy přes `.reel-mode`; takové end-to-end ověření není v repozitáři
   doloženo.
@@ -22,6 +21,12 @@ repozitáře evidovány. Nové položky přidávej až po rozhodnutí uživatele
 
 ## Nedávno dokončeno
 
+- 2026-11-23 — na VPS přidán a aktivován Postfix alias
+  `vtt-cz@timechip.cz` do lokálního Maildiru uživatele `skybedy`; původní mapa
+  byla před změnou zálohována.
+- 2026-11-23 — doplněn read-only režim `--doctor` pro předletovou kontrolu
+  workflow a serverové volby pro běh `yt-dlp` bez browser cookies a vlastní
+  aktualizace.
 - 2026-11-23 — v experimentální větvi připraven obousměrný e-mailový handoff
   přes SMTP/IMAP s kontrolou odesílatele, reply vazby, velikosti a WebVTT;
   izolované i race testy procházejí, reálné připojení ke schránce a VPS

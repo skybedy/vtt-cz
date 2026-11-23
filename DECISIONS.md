@@ -85,3 +85,8 @@ předává `/usr/sbin/sendmail` a odpovědi čte bez změn z existujícího Mail
 Vzdálené SMTP/IMAP zůstává podporovanou alternativou. Lokální transport
 nevyžaduje poštovní heslo a běží se stejnými oprávněními jako vlastník
 Maildiru.
+
+Chybějící runtime součásti se řeší explicitní read-only kontrolou `--doctor`,
+která pro zvolený režim vypíše programy, modely a e-mailovou konfiguraci.
+Aplikace sama nespouští privilegované instalátory ani nemění systém; tím se
+odděluje opakovatelná diagnostika od distribučně specifického deploymentu.

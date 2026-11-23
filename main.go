@@ -48,6 +48,7 @@ type cliOptions struct {
 	reelMode      bool
 	emailMode     bool
 	emailListener bool
+	doctor        bool
 }
 
 func main() {
@@ -61,6 +62,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Chyba:", err)
 		printUsage()
 		os.Exit(1)
+	}
+	if options.doctor {
+		if err := runDoctor(options, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "Chyba:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	if options.emailListener {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -226,6 +234,11 @@ func parseArguments(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("prepinac --email-listen je zadan vicekrat")
 			}
 			options.emailListener = true
+		case "--doctor":
+			if options.doctor {
+				return cliOptions{}, fmt.Errorf("prepinac --doctor je zadan vicekrat")
+			}
+			options.doctor = true
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return cliOptions{}, fmt.Errorf("neznamy prepinac %q", arg)
@@ -245,8 +258,109 @@ func parseArguments(args []string) (cliOptions, error) {
 	if options.emailListener && (options.mode != "url" || options.input != "" || options.localWhisper || options.workMode || options.reelMode || options.emailMode) {
 		return cliOptions{}, fmt.Errorf("--email-listen nelze kombinovat s jinymi prepinaci ani vstupem")
 	}
+	if options.doctor && options.input != "" {
+		return cliOptions{}, fmt.Errorf("--doctor nelze kombinovat s URL ani cestou ke vstupu")
+	}
 
 	return options, nil
+}
+
+func runDoctor(options cliOptions, output io.Writer) error {
+	problems := 0
+	fmt.Fprintln(output, "Kontrola prostredi pro vtt-cz:")
+
+	report := func(label, detail string, err error) {
+		if err != nil {
+			problems++
+			fmt.Fprintf(output, "[CHYBI] %s: %v\n", label, err)
+			return
+		}
+		fmt.Fprintf(output, "[OK] %s: %s\n", label, detail)
+	}
+	checkCommand := func(name, installHint string) {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			report(name, "", fmt.Errorf("neni v PATH; %s", installHint))
+			return
+		}
+		report(name, path, nil)
+	}
+	checkPath := func(label, path string, executable bool) {
+		info, err := os.Stat(path)
+		if err != nil {
+			report(label, "", fmt.Errorf("%s: %w", path, err))
+			return
+		}
+		if !info.Mode().IsRegular() {
+			report(label, "", fmt.Errorf("%s neni bezny soubor", path))
+			return
+		}
+		if executable && info.Mode().Perm()&0o111 == 0 {
+			report(label, "", fmt.Errorf("%s neni spustitelny", path))
+			return
+		}
+		report(label, path, nil)
+	}
+	checkDirectory := func(label, path string) {
+		info, err := os.Stat(path)
+		if err != nil {
+			report(label, "", fmt.Errorf("%s: %w", path, err))
+			return
+		}
+		if !info.IsDir() {
+			report(label, "", fmt.Errorf("%s neni adresar", path))
+			return
+		}
+		report(label, path, nil)
+	}
+
+	checkCommand("ffmpeg", "na Debianu/Ubuntu nainstaluj balicek ffmpeg")
+	checkCommand("ffprobe", "na Debianu/Ubuntu nainstaluj balicek ffmpeg")
+	checkCommand("nice", "na Debianu/Ubuntu nainstaluj balicek coreutils")
+	checkCommand("ionice", "na Debianu/Ubuntu nainstaluj balicek util-linux")
+	if options.mode == "dvd" {
+		checkCommand("HandBrakeCLI", "na Debianu/Ubuntu nainstaluj balicek handbrake-cli")
+	} else if !options.emailListener {
+		checkCommand("yt-dlp", "nainstaluj oficialni yt-dlp binarku nebo balicek")
+		cookies := ytDLPCookieArguments()
+		if len(cookies) == 0 {
+			fmt.Fprintln(output, "[OK] yt-dlp cookies: vypnute")
+		} else {
+			fmt.Fprintf(output, "[INFO] yt-dlp cookies: prohlizec %s\n", cookies[1])
+		}
+	}
+
+	if options.workMode || options.localWhisper {
+		config := localwhisper.DefaultConfig("", "")
+		checkPath("whisper-cli", config.WhisperBin, true)
+		checkPath("VAD executable", config.VADBin, true)
+		checkPath("Whisper model", config.ModelPath, false)
+		checkPath("Silero VAD model", config.VADModel, false)
+	}
+
+	if options.emailMode || options.emailListener {
+		config, err := emailConfigFromEnvironment()
+		if err != nil {
+			report("e-mailova konfigurace", "", err)
+		} else {
+			report("e-mailova konfigurace", config.Transport, nil)
+			if config.Transport == "local" {
+				checkPath("sendmail", config.SendmailPath, true)
+				checkDirectory("Maildir/new", filepath.Join(config.MaildirPath, "new"))
+				checkDirectory("Maildir/cur", filepath.Join(config.MaildirPath, "cur"))
+			}
+		}
+	}
+
+	if !options.workMode && !options.emailListener && os.Getenv("OPENAI_API_KEY") == "" {
+		report("OPENAI_API_KEY", "", fmt.Errorf("promenna prostredi neni nastavena"))
+	}
+
+	if problems != 0 {
+		return fmt.Errorf("kontrola prostredi nasla %d problemu", problems)
+	}
+	fmt.Fprintln(output, "Prostredi je pro zvoleny rezim pripravene.")
+	return nil
 }
 
 func readURL(reader *bufio.Reader, initialURL string) string {
@@ -622,15 +736,18 @@ func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 		return "", "", fmt.Errorf("program yt-dlp neni nainstalovany: %w", err)
 	}
 
-	if err := updateYTDLP(ytDLPPath); err != nil {
-		fmt.Fprintln(os.Stderr, "Varovani: automaticka aktualizace yt-dlp se nepovedla:", err)
-		fmt.Fprintln(os.Stderr, "Pokracuji se stavajici verzi yt-dlp.")
+	if ytDLPAutoUpdateEnabled() {
+		if err := updateYTDLP(ytDLPPath); err != nil {
+			fmt.Fprintln(os.Stderr, "Varovani: automaticka aktualizace yt-dlp se nepovedla:", err)
+			fmt.Fprintln(os.Stderr, "Pokracuji se stavajici verzi yt-dlp.")
+		}
 	}
 
-	cmd := exec.Command(
+	arguments := []string{
 		ytDLPPath,
-		"--cookies-from-browser",
-		"firefox",
+	}
+	arguments = append(arguments, ytDLPCookieArguments()...)
+	arguments = append(arguments,
 		"--format",
 		"best[acodec!=none][vcodec!=none]/best",
 		"--extract-audio",
@@ -641,6 +758,7 @@ func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 		"--keep-video",
 		url,
 	)
+	cmd := exec.Command(arguments[0], arguments[1:]...)
 
 	cmd.Dir = workDir
 	cmd.Stdout = os.Stdout
@@ -661,6 +779,29 @@ func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 	}
 
 	return videoPath, mp3Path, nil
+}
+
+func ytDLPCookieArguments() []string {
+	browser := strings.TrimSpace(os.Getenv("VTT_CZ_YTDLP_COOKIES_FROM_BROWSER"))
+	if browser == "" {
+		browser = "firefox"
+	}
+	switch strings.ToLower(browser) {
+	case "none", "off", "false", "0":
+		return nil
+	default:
+		return []string{"--cookies-from-browser", browser}
+	}
+}
+
+func ytDLPAutoUpdateEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("VTT_CZ_YTDLP_AUTO_UPDATE")))
+	switch value {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func updateYTDLP(ytDLPPath string) error {
@@ -1416,6 +1557,7 @@ func printUsage() {
 	fmt.Println("  vtt-cz --work --reel [\"URL_VIDEA\"]")
 	fmt.Println("  vtt-cz --work --email [\"URL_VIDEA\"]")
 	fmt.Println("  vtt-cz --email-listen")
+	fmt.Println("  vtt-cz --doctor [--work --email | --email-listen | --dvd]")
 	fmt.Println("  vtt-cz --dvd")
 	fmt.Println("  vtt-cz --dvd \"/cesta/k/DVD_nebo_ISO\"")
 	fmt.Println("  vtt-cz --local-whisper --dvd [\"/cesta/k/DVD_nebo_ISO\"]")
