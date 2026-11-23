@@ -1,0 +1,14 @@
+[Unit]
+Description=vtt-cz email handoff listener
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/vtt-cz/email.env
+ExecStart=%h/.local/bin/vtt-cz --email-listen
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -147,6 +147,66 @@ vlozit do `@Plugin Creator`, je v souboru
 `plugins/vtt-cz-subtitle-workflow/PLUGIN-CREATOR-PROMPT.txt`. Samostatny zdroj
 vnoreneho skillu zustava v `skills/vtt-cz-work-translation/`.
 
+## Predani Work titulku e-mailem na VPS
+
+Experimentalni e-mailovy rezim odstranuje rucni kopirovani VTT z VPS. Po
+lokalnim prepisu posle aplikace `.en.raw.vtt` jako prilohu. Finalni `.cs.vtt`
+posli jako odpoved na puvodni e-mail. Listener odpoved stahne pres IMAP,
+overi ji a automaticky spusti vypaleni titulku.
+
+Pouzij samostatnou e-mailovou schranku urcenou jen pro `vtt-cz`. Botova
+adresa a povolena adresa uzivatele musi byt ruzne, aby se zabranilo smycce
+automatickych odpovedi. Pouzij aplikacni heslo a neposilej ho do repozitare.
+
+Na VPS nastav:
+
+```bash
+export VTT_CZ_EMAIL_SMTP_ADDR="smtp.example.com:465"
+export VTT_CZ_EMAIL_SMTP_MODE="tls"
+export VTT_CZ_EMAIL_IMAP_ADDR="imap.example.com:993"
+export VTT_CZ_EMAIL_USERNAME="vtt-cz-bot@example.com"
+export VTT_CZ_EMAIL_PASSWORD="aplikacni_heslo"
+export VTT_CZ_EMAIL_FROM="vtt-cz-bot@example.com"
+export VTT_CZ_EMAIL_TO="uzivatel@example.net"
+export VTT_CZ_EMAIL_ALLOWED_FROM="uzivatel@example.net"
+export VTT_CZ_EMAIL_MAILBOX="INBOX"
+export VTT_CZ_WORK_ROOT="/home/uzivatel/Videos/vtt-cz"
+```
+
+Pro SMTP port 465 pouzij `VTT_CZ_EMAIL_SMTP_MODE=tls`. Pro port 587 se
+STARTTLS pouzij `VTT_CZ_EMAIL_SMTP_MODE=starttls`. IMAP spojeni je vzdy
+sifrovane TLS, obvykle na portu 993.
+
+Listener nech bezet na pozadi:
+
+```bash
+./bin/vtt-cz --email-listen
+```
+
+Novou ulohu spust takto:
+
+```bash
+./bin/vtt-cz --work --email "https://www.youtube.com/watch?v=..."
+```
+
+Po prijeti anglickeho VTT:
+
+1. stahni prilohu z e-mailu,
+2. zpracuj ji pluginem `@VTT CZ Subtitle Workflow`,
+3. odpovez na puvodni zpravu a priloz finalni `.cs.vtt`,
+4. listener potvrdi validaci a po vypaleni oznami cestu k hotovemu videu.
+
+Listener prijima jen zpravy z `VTT_CZ_EMAIL_ALLOWED_FROM` a vyzaduje vazbu
+`In-Reply-To` nebo `References` na nahodne `Message-ID` puvodni ulohy. Prijme
+prave jednu `.vtt` prilohu do 5 MB a spusti vestavenou WebVTT validaci. Stav
+udrzuje v `.email-handoff.json`; IMAP UID a UIDVALIDITY uklada do
+`.email-imap-cursor.json` v korenove pracovni slozce.
+
+Pro systemd user service lze pouzit sablonu
+`deploy/vtt-cz-email.service.example` a promenne z `deploy/email.env.example`.
+Skutecny env soubor uloz mimo repozitar s pravy `0600`. Aby user service
+bezela i po odhlaseni z VPS, muze byt potreba povolit systemd linger.
+
 ## DVD
 
 Pro DVD vloz disk do mechaniky a spust:
@@ -201,6 +261,7 @@ Pracovni slozka bude v:
 ```
 
 nebo v odpovidajici systemove slozce videi podle prikazu `xdg-user-dir VIDEOS`.
+Na serveru lze koren prepsat promennou `VTT_CZ_WORK_ROOT`.
 
 V pracovni slozce zustane:
 

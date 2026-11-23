@@ -63,3 +63,19 @@ vypalovací pipeline jako pro video stažené z URL.
 Přepínač `--reel` používá menší ASS styl titulků vhodný pro vertikální video.
 Marker `.reel-mode` zachovává volbu při pokračování úlohy, včetně předání do
 režimu ChatGPT Work.
+
+## 2026-11-23 — E-mail jako první experimentální VPS handoff
+
+**Stav:** experimentální, čeká na reálné VPS ověření
+
+Před nasazením Telegram varianty se anglické a české VTT předávají přes
+vyhrazenou e-mailovou schránku. Odeslání používá SMTP s TLS nebo STARTTLS,
+příjem IMAP přes TLS. Pro IMAP je přijata stabilní knihovna
+`github.com/emersion/go-imap v1.2.1`, protože Go standardní knihovna IMAP
+klienta neposkytuje.
+
+Příchozí VTT musí být od přesně povolené adresy a obsahovat `In-Reply-To` nebo
+`References` s náhodným `Message-ID` původní úlohy. Je povolena právě jedna
+`.vtt` příloha do 5 MB, která musí projít WebVTT validací. Botova a uživatelská
+adresa musí být různé, aby automatické stavové zprávy nevytvořily smyčku.
+Heslo patří pouze do chráněného env souboru mimo repozitář.
