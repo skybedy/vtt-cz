@@ -1,0 +1,14 @@
+[Unit]
+Description=vtt-cz Telegram handoff listener
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/vtt-cz/telegram.env
+ExecStart=%h/.local/bin/vtt-cz --telegram-listen
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

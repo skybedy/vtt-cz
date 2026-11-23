@@ -11,14 +11,16 @@ import (
 
 func TestParseArguments(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      []string
-		wantMode  string
-		wantInput string
-		wantLocal bool
-		wantWork  bool
-		wantReel  bool
-		wantError bool
+		name         string
+		args         []string
+		wantMode     string
+		wantInput    string
+		wantLocal    bool
+		wantWork     bool
+		wantReel     bool
+		wantTelegram bool
+		wantListener bool
+		wantError    bool
 	}{
 		{name: "interactive URL", wantMode: "url"},
 		{name: "URL", args: []string{"https://example.com/video"}, wantMode: "url", wantInput: "https://example.com/video"},
@@ -28,6 +30,8 @@ func TestParseArguments(t *testing.T) {
 		{name: "Work URL", args: []string{"--work", "https://example.com/video"}, wantMode: "url", wantInput: "https://example.com/video", wantWork: true},
 		{name: "Reel URL", args: []string{"--reel", "https://example.com/video"}, wantMode: "url", wantInput: "https://example.com/video", wantReel: true},
 		{name: "Work Reel", args: []string{"--work", "--reel"}, wantMode: "url", wantWork: true, wantReel: true},
+		{name: "Work Telegram", args: []string{"--work", "--telegram", "https://example.com/video"}, wantMode: "url", wantInput: "https://example.com/video", wantWork: true, wantTelegram: true},
+		{name: "Telegram listener", args: []string{"--telegram-listen"}, wantMode: "url", wantListener: true},
 		{name: "detected DVD", args: []string{"--dvd"}, wantMode: "dvd"},
 		{name: "explicit DVD", args: []string{"--dvd", "/dev/sr0"}, wantMode: "dvd", wantInput: "/dev/sr0"},
 		{name: "local Whisper DVD", args: []string{"--local-whisper", "--dvd", "/dev/sr0"}, wantMode: "dvd", wantInput: "/dev/sr0", wantLocal: true},
@@ -38,28 +42,30 @@ func TestParseArguments(t *testing.T) {
 		{name: "duplicate local Whisper", args: []string{"--local-whisper", "--local-whisper"}, wantError: true},
 		{name: "duplicate Work", args: []string{"--work", "--work"}, wantError: true},
 		{name: "duplicate Reel", args: []string{"--reel", "--reel"}, wantError: true},
+		{name: "duplicate Telegram", args: []string{"--telegram", "--telegram"}, wantError: true},
+		{name: "Telegram without Work", args: []string{"--telegram"}, wantError: true},
+		{name: "Telegram listener with Work", args: []string{"--telegram-listen", "--work"}, wantError: true},
+		{name: "Telegram listener with input", args: []string{"--telegram-listen", "https://example.com/video"}, wantError: true},
 		{name: "Work and local Whisper", args: []string{"--work", "--local-whisper"}, wantError: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mode, input, localWhisper, workMode, reelMode, err := parseArguments(test.args)
+			options, err := parseArguments(test.args)
 			if (err != nil) != test.wantError {
 				t.Fatalf("parseArguments() error = %v, wantError %v", err, test.wantError)
 			}
-			if mode != test.wantMode || input != test.wantInput || localWhisper != test.wantLocal || workMode != test.wantWork || reelMode != test.wantReel {
+			if options.mode != test.wantMode || options.input != test.wantInput || options.localWhisper != test.wantLocal || options.workMode != test.wantWork || options.reelMode != test.wantReel || options.telegramMode != test.wantTelegram || options.telegramListener != test.wantListener {
 				t.Fatalf(
-					"parseArguments() = (%q, %q, %v, %v, %v), want (%q, %q, %v, %v, %v)",
-					mode,
-					input,
-					localWhisper,
-					workMode,
-					reelMode,
+					"parseArguments() = %#v, want mode=%q input=%q local=%v work=%v reel=%v telegram=%v listener=%v",
+					options,
 					test.wantMode,
 					test.wantInput,
 					test.wantLocal,
 					test.wantWork,
 					test.wantReel,
+					test.wantTelegram,
+					test.wantListener,
 				)
 			}
 		})
@@ -149,7 +155,7 @@ func TestRunWorkModeWaitsForCzechVTT(t *testing.T) {
 		}
 	}
 
-	if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath, true); err != nil {
+	if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath, true, false); err != nil {
 		t.Fatalf("runWorkMode() error = %v", err)
 	}
 	instructionsPath := filepath.Join(workDir, "CHATGPT-WORK.txt")
@@ -182,7 +188,7 @@ func TestRunWorkModeAcceptsCompletedCzechVTT(t *testing.T) {
 		}
 	}
 
-	if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath, false); err != nil {
+	if err := runWorkMode(workDir, videoPath, mp3Path, rawEnVTTPath, csVTTPath, outputVideoPath, false, false); err != nil {
 		t.Fatalf("runWorkMode() error = %v", err)
 	}
 }

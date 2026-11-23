@@ -1,9 +1,13 @@
 # Úkoly
 
-Aktualizováno: 2026-11-22
+Aktualizováno: 2026-11-23
 
 ## Rozpracováno — vysoká priorita
 
+- [ ] Vytvořit samostatného Telegram bota, nastavit soukromý chat ID a
+  ověřit celý handoff `.en.raw.vtt` -> ChatGPT Work -> `.cs.vtt` na VPS.
+- [ ] Nainstalovat experimentální binárku a systemd user listener na VPS;
+  ověřit restart, obnovu rozpracovaného renderingu a uložení stavu.
 - [ ] Ručně ověřit vypálení titulků pro běžné i vertikální video a pokračování
   Reel úlohy přes `.reel-mode`; takové end-to-end ověření není v repozitáři
   doloženo.
@@ -18,6 +22,10 @@ repozitáře evidovány. Nové položky přidávej až po rozhodnutí uživatele
 
 ## Nedávno dokončeno
 
+- 2026-11-23 — v experimentální větvi připraven obousměrný Telegram handoff s
+  validací odesílatele, reply vazby, velikosti a WebVTT; izolované testy
+  procházejí, race kontrola čeká na Go instalaci s `runtime/race` a reálné VPS
+  nasazení ještě čeká.
 - 2026-11-22 — zavedena projektová paměť pro práci napříč Codex chaty.
 - 2026-11-22 — dokončena a commitnuta podpora Reel videa včetně testů a
   dokumentace (`e3fe3ac`); prošly `go test`, `go vet` a `go build`.

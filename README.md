@@ -147,6 +147,62 @@ vlozit do `@Plugin Creator`, je v souboru
 `plugins/vtt-cz-subtitle-workflow/PLUGIN-CREATOR-PROMPT.txt`. Samostatny zdroj
 vnoreneho skillu zustava v `skills/vtt-cz-work-translation/`.
 
+## Predani Work titulku pres Telegram na VPS
+
+Experimentalni Telegram rezim odstranuje rucni kopirovani VTT mezi VPS a
+lokalnim pocitacem. Po lokalnim prepisu posle bot `.en.raw.vtt` jako dokument
+do soukromeho chatu. Finalni `.cs.vtt` posli jako odpoved na tuto zpravu.
+Listener soubor stahne, overi a automaticky spusti vypaleni titulku.
+
+Pouzij samostatneho bota vytvoreneho pres `@BotFather`. Nepouzivej stejny bot
+token jako Hermes: Telegram dovoluje pro jednoho bota jen jeden prijimaci tok
+aktualizaci a `vtt-cz --telegram-listen` pouziva long polling.
+
+Na VPS nastav:
+
+```bash
+export VTT_CZ_TELEGRAM_BOT_TOKEN="token_od_BotFather"
+export VTT_CZ_TELEGRAM_CHAT_ID="tvoje_ciselne_ID_soukromeho_chatu"
+export VTT_CZ_WORK_ROOT="/home/uzivatel/Videos/vtt-cz"
+```
+
+Token ani skutecne hodnoty neukladej do repozitare. Bot musi mit otevreny
+soukromy chat s uzivatelem odpovidajicim `VTT_CZ_TELEGRAM_CHAT_ID`. Skupinove
+chaty nejsou podporovane. Pokud ID jeste neznas, posli novemu botovi `/start`
+a pred spustenim listeneru ho zjisti z `getUpdates` Telegram Bot API.
+
+Listener nech bezet na pozadi:
+
+```bash
+./bin/vtt-cz --telegram-listen
+```
+
+Novou ulohu spust takto:
+
+```bash
+./bin/vtt-cz --work --telegram "https://www.youtube.com/watch?v=..."
+```
+
+Po prijeti anglickeho VTT:
+
+1. stahni dokument z Telegram Web nebo desktopni aplikace,
+2. zpracuj jej pluginem `@VTT CZ Subtitle Workflow`,
+3. finalni `.cs.vtt` posli botovi jako odpoved na puvodni zpravu s anglickym
+   VTT,
+4. bot potvrdi validaci a po vypaleni oznami cestu k hotovemu videu na VPS.
+
+Listener prijima pouze dokumenty z nastaveneho soukromeho chat/user ID,
+vyzaduje odpoved na konkretni zpravu ulohy, prijima jen `.vtt` do 5 MB a pred
+ulozenim spousti vestavenou WebVTT validaci. Stav udrzuje v
+`.telegram-handoff.json`; zpracovane Telegram update ID v
+`.telegram-update-offset` v korenove pracovni slozce.
+
+Pro systemd user service lze pouzit sablonu
+`deploy/vtt-cz-telegram.service.example` a promenne z
+`deploy/telegram.env.example`. Skutecny env soubor uloz mimo repozitar s pravy
+`0600`. Aby user service bezela i po odhlaseni z VPS, muze byt potreba povolit
+uzivateli systemd linger.
+
 ## DVD
 
 Pro DVD vloz disk do mechaniky a spust:
@@ -201,6 +257,7 @@ Pracovni slozka bude v:
 ```
 
 nebo v odpovidajici systemove slozce videi podle prikazu `xdg-user-dir VIDEOS`.
+Na serveru lze koren prepsat promennou `VTT_CZ_WORK_ROOT`.
 
 V pracovni slozce zustane:
 

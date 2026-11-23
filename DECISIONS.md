@@ -63,3 +63,18 @@ vypalovací pipeline jako pro video stažené z URL.
 Přepínač `--reel` používá menší ASS styl titulků vhodný pro vertikální video.
 Marker `.reel-mode` zachovává volbu při pokračování úlohy, včetně předání do
 režimu ChatGPT Work.
+
+## 2026-11-23 — Telegram jako experimentální VPS handoff
+
+**Stav:** experimentální, čeká na reálné VPS ověření
+
+Anglické a české VTT se mezi VPS a uživatelem předávají jako Telegram
+dokumenty. Samostatný bot používá long polling, takže VPS nepotřebuje veřejný
+HTTP endpoint. Hermes bot token se nesdílí, protože jeden bot má mít jedinou
+přijímací integraci.
+
+Příjem je omezen na nastavené kladné ID soukromého chatu i odesílatele. Český
+VTT musí být odpovědí na původní zprávu konkrétní úlohy, mít koncovku `.vtt`,
+velikost nejvýše 5 MB a projít vestavěnou WebVTT validací. Trvalým zdrojem
+stavu zůstává VPS (`.telegram-handoff.json` a offset listeneru), nikoli chat.
+Video se přes Telegram neposílá.
