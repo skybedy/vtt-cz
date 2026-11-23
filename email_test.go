@@ -38,6 +38,23 @@ func TestEmailConfigFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestLocalEmailConfigFromEnvironment(t *testing.T) {
+	t.Setenv("VTT_CZ_EMAIL_TRANSPORT", "local")
+	t.Setenv("VTT_CZ_EMAIL_FROM", "bot@example.com")
+	t.Setenv("VTT_CZ_EMAIL_TO", "user@example.net")
+	t.Setenv("VTT_CZ_EMAIL_ALLOWED_FROM", "user@example.net")
+	t.Setenv("VTT_CZ_EMAIL_MAILDIR", "/home/example/Maildir")
+	t.Setenv("VTT_CZ_EMAIL_SENDMAIL", "")
+
+	config, err := emailConfigFromEnvironment()
+	if err != nil {
+		t.Fatalf("emailConfigFromEnvironment() error = %v", err)
+	}
+	if config.Transport != "local" || config.SendmailPath != "/usr/sbin/sendmail" || config.MaildirPath != "/home/example/Maildir" || config.To != "user@example.net" {
+		t.Fatalf("local config = %#v", config)
+	}
+}
+
 func TestWorkRootDirFromEnvironment(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "jobs")
 	t.Setenv("VTT_CZ_WORK_ROOT", want)
@@ -75,6 +92,88 @@ func TestBuildOutgoingEmailRoundTripAttachment(t *testing.T) {
 	}
 	if name != filepath.Base(attachmentPath) || string(attachment) != vtt {
 		t.Fatalf("attachment = %q %q", name, attachment)
+	}
+}
+
+func TestSendmailEmailSender(t *testing.T) {
+	binPath := filepath.Join(t.TempDir(), "sendmail")
+	messagePath := filepath.Join(t.TempDir(), "message.eml")
+	argumentsPath := filepath.Join(t.TempDir(), "arguments.txt")
+	writeTestExecutable(t, binPath, `#!/bin/sh
+printf '%s\n' "$*" > "$VTT_CZ_TEST_ARGUMENTS"
+cat > "$VTT_CZ_TEST_MESSAGE"
+`)
+	t.Setenv("VTT_CZ_TEST_ARGUMENTS", argumentsPath)
+	t.Setenv("VTT_CZ_TEST_MESSAGE", messagePath)
+	config := testLocalEmailConfig(t)
+	config.SendmailPath = binPath
+	sender := sendmailEmailSender{config: config}
+	if err := sender.Send(context.Background(), outgoingEmail{
+		Subject:   "Test",
+		Body:      "Testovaci zprava.\n",
+		MessageID: "<test@example.com>",
+	}); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	arguments, err := os.ReadFile(argumentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(arguments), "-oi -t -f bot@example.com") {
+		t.Fatalf("sendmail arguments = %q", arguments)
+	}
+	message, err := os.ReadFile(messagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(message), "To: user@example.net") || !strings.Contains(string(message), "Message-ID: <test@example.com>") {
+		t.Fatalf("sendmail message = %q", message)
+	}
+}
+
+func TestMaildirEmailInboxFetchesInOrder(t *testing.T) {
+	config := testLocalEmailConfig(t)
+	for _, directory := range []string{"new", "cur", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(config.MaildirPath, directory), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw := buildTestEmailReply(t, "<original@example.com>", "user@example.net", "translated.cs.vtt", "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nAhoj.\n")
+	firstPath := filepath.Join(config.MaildirPath, "new", "first")
+	secondPath := filepath.Join(config.MaildirPath, "cur", "second:2,S")
+	for _, path := range []string{firstPath, secondPath} {
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstTime := time.Unix(100, 0)
+	secondTime := time.Unix(200, 0)
+	if err := os.Chtimes(firstPath, firstTime, firstTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(secondPath, secondTime, secondTime); err != nil {
+		t.Fatal(err)
+	}
+
+	inbox := maildirEmailInbox{config: config}
+	batch, err := inbox.Fetch(context.Background(), emailCursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.Backend != "maildir" || len(batch.Messages) != 2 || batch.Messages[0].MaildirName != filepath.Join("new", "first") || batch.Messages[1].MaildirName != filepath.Join("cur", "second:2,S") {
+		t.Fatalf("maildir batch = %#v", batch)
+	}
+	cursor := emailCursor{Backend: "maildir"}
+	advanceEmailCursor(&cursor, batch.Messages[0])
+	nextBatch, err := inbox.Fetch(context.Background(), cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nextBatch.Messages) != 1 || nextBatch.Messages[0].MaildirName != filepath.Join("cur", "second:2,S") {
+		t.Fatalf("next maildir batch = %#v", nextBatch)
+	}
+	if _, err := os.Stat(firstPath); err != nil {
+		t.Fatalf("Maildir message was modified or moved: %v", err)
 	}
 }
 
@@ -286,6 +385,7 @@ func testEmailHandoff(messageID string) emailHandoff {
 
 func testEmailConfig() emailConfig {
 	return emailConfig{
+		Transport:   "smtp-imap",
 		SMTPAddr:    "smtp.example.com:465",
 		SMTPMode:    "tls",
 		IMAPAddr:    "imap.example.com:993",
@@ -298,9 +398,22 @@ func testEmailConfig() emailConfig {
 	}
 }
 
+func testLocalEmailConfig(t *testing.T) emailConfig {
+	t.Helper()
+	return emailConfig{
+		Transport:    "local",
+		From:         "bot@example.com",
+		To:           "user@example.net",
+		AllowedFrom:  "user@example.net",
+		SendmailPath: "/usr/sbin/sendmail",
+		MaildirPath:  filepath.Join(t.TempDir(), "Maildir"),
+	}
+}
+
 func setEmailTestEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("VTT_CZ_EMAIL_SMTP_ADDR", "smtp.example.com:465")
+	t.Setenv("VTT_CZ_EMAIL_TRANSPORT", "")
 	t.Setenv("VTT_CZ_EMAIL_SMTP_MODE", "")
 	t.Setenv("VTT_CZ_EMAIL_IMAP_ADDR", "imap.example.com:993")
 	t.Setenv("VTT_CZ_EMAIL_USERNAME", "bot@example.com")

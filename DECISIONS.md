@@ -69,8 +69,8 @@ režimu ChatGPT Work.
 **Stav:** experimentální, čeká na reálné VPS ověření
 
 Před nasazením Telegram varianty se anglické a české VTT předávají přes
-vyhrazenou e-mailovou schránku. Odeslání používá SMTP s TLS nebo STARTTLS,
-příjem IMAP přes TLS. Pro IMAP je přijata stabilní knihovna
+vyhrazenou e-mailovou adresu. Vzdálená varianta používá SMTP s TLS nebo
+STARTTLS a příjem IMAP přes TLS. Pro IMAP je přijata stabilní knihovna
 `github.com/emersion/go-imap v1.2.1`, protože Go standardní knihovna IMAP
 klienta neposkytuje.
 
@@ -79,3 +79,9 @@ Příchozí VTT musí být od přesně povolené adresy a obsahovat `In-Reply-To
 `.vtt` příloha do 5 MB, která musí projít WebVTT validací. Botova a uživatelská
 adresa musí být různé, aby automatické stavové zprávy nevytvořily smyčku.
 Heslo patří pouze do chráněného env souboru mimo repozitář.
+
+Na VPS s vlastním Postfixem je preferovaný lokální transport: odchozí zprávy
+předává `/usr/sbin/sendmail` a odpovědi čte bez změn z existujícího Maildiru.
+Vzdálené SMTP/IMAP zůstává podporovanou alternativou. Lokální transport
+nevyžaduje poštovní heslo a běží se stejnými oprávněními jako vlastník
+Maildiru.

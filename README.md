@@ -151,16 +151,42 @@ vnoreneho skillu zustava v `skills/vtt-cz-work-translation/`.
 
 Experimentalni e-mailovy rezim odstranuje rucni kopirovani VTT z VPS. Po
 lokalnim prepisu posle aplikace `.en.raw.vtt` jako prilohu. Finalni `.cs.vtt`
-posli jako odpoved na puvodni e-mail. Listener odpoved stahne pres IMAP,
-overi ji a automaticky spusti vypaleni titulku.
+posli jako odpoved na puvodni e-mail. Listener odpoved prevezme z lokalniho
+Maildiru nebo pres IMAP, overi ji a automaticky spusti vypaleni titulku.
 
-Pouzij samostatnou e-mailovou schranku urcenou jen pro `vtt-cz`. Botova
-adresa a povolena adresa uzivatele musi byt ruzne, aby se zabranilo smycce
-automatickych odpovedi. Pouzij aplikacni heslo a neposilej ho do repozitare.
+Botova adresa a povolena adresa uzivatele musi byt ruzne, aby se zabranilo
+smycce automatickych odpovedi. K dispozici jsou dva transporty.
+
+### Lokalni Postfix a Maildir
+
+Pokud Postfix prijima odpovedi na stejne VPS, je preferovany transport
+`local`. Nevyzaduje sitove prihlasovaci udaje: zpravy odesila pres kompatibilni
+program `sendmail` a odpovedi pouze cte z adresaru `Maildir/new` a
+`Maildir/cur`. Zpravy nepresouva ani neoznacuje jako prectene.
+
+```bash
+export VTT_CZ_EMAIL_TRANSPORT="local"
+export VTT_CZ_EMAIL_FROM="vtt-cz@example.com"
+export VTT_CZ_EMAIL_TO="uzivatel@example.net"
+export VTT_CZ_EMAIL_ALLOWED_FROM="uzivatel@example.net"
+export VTT_CZ_EMAIL_SENDMAIL="/usr/sbin/sendmail"
+export VTT_CZ_EMAIL_MAILDIR="/home/uzivatel/Maildir"
+export VTT_CZ_WORK_ROOT="/home/uzivatel/Videos/vtt-cz"
+```
+
+Postfix musi adresu z `VTT_CZ_EMAIL_FROM` dorucit do nastaveneho Maildiru.
+Cursor pouziva cas posledni zpracovane zpravy a jeji relativni jmeno; pri
+restartu proto navaze bez zmeny obsahu schranky.
+
+### Vzdalene SMTP a IMAP
+
+Pokud schranku hostuje jiny server, pouzij transport `smtp-imap`, samostatnou
+schranku a aplikacni heslo. Heslo neposilej do repozitare.
 
 Na VPS nastav:
 
 ```bash
+export VTT_CZ_EMAIL_TRANSPORT="smtp-imap"
 export VTT_CZ_EMAIL_SMTP_ADDR="smtp.example.com:465"
 export VTT_CZ_EMAIL_SMTP_MODE="tls"
 export VTT_CZ_EMAIL_IMAP_ADDR="imap.example.com:993"
@@ -199,11 +225,12 @@ Po prijeti anglickeho VTT:
 Listener prijima jen zpravy z `VTT_CZ_EMAIL_ALLOWED_FROM` a vyzaduje vazbu
 `In-Reply-To` nebo `References` na nahodne `Message-ID` puvodni ulohy. Prijme
 prave jednu `.vtt` prilohu do 5 MB a spusti vestavenou WebVTT validaci. Stav
-udrzuje v `.email-handoff.json`; IMAP UID a UIDVALIDITY uklada do
-`.email-imap-cursor.json` v korenove pracovni slozce.
+udrzuje v `.email-handoff.json`; pozici ve schrance uklada do
+`.email-inbox-cursor.json` v korenove pracovni slozce.
 
 Pro systemd user service lze pouzit sablonu
-`deploy/vtt-cz-email.service.example` a promenne z `deploy/email.env.example`.
+`deploy/vtt-cz-email.service.example`. Lokalni transport ma promenne v
+`deploy/email-local.env.example`, vzdaleny v `deploy/email.env.example`.
 Skutecny env soubor uloz mimo repozitar s pravy `0600`. Aby user service
 bezela i po odhlaseni z VPS, muze byt potreba povolit systemd linger.
 

@@ -4,10 +4,10 @@ Aktualizováno: 2026-11-23
 
 ## Rozpracováno — vysoká priorita
 
-- [ ] Založit vyhrazenou e-mailovou schránku s aplikačním heslem a ověřit
-  SMTP/IMAP spojení i celý handoff `.en.raw.vtt` -> ChatGPT Work -> `.cs.vtt`.
+- [ ] Po schválení přidat na VPS alias `vtt-cz@timechip.cz` do lokálního
+  Maildiru uživatele `skybedy` a ověřit skutečný Postfix/Maildir handoff.
 - [ ] Nainstalovat experimentální binárku a systemd user listener na VPS;
-  ověřit restart, IMAP UIDVALIDITY a obnovu rozpracovaného renderingu.
+  ověřit restart, Maildir cursor a obnovu rozpracovaného renderingu.
 - [ ] Ručně ověřit vypálení titulků pro běžné i vertikální video a pokračování
   Reel úlohy přes `.reel-mode`; takové end-to-end ověření není v repozitáři
   doloženo.
@@ -26,6 +26,9 @@ repozitáře evidovány. Nové položky přidávej až po rozhodnutí uživatele
   přes SMTP/IMAP s kontrolou odesílatele, reply vazby, velikosti a WebVTT;
   izolované i race testy procházejí, reálné připojení ke schránce a VPS
   nasazení ještě čeká.
+- 2026-11-23 — doplněn lokální transport přes `/usr/sbin/sendmail` a read-only
+  Maildir cursor bez potřeby e-mailového hesla; VPS konfigurace zůstala beze
+  změny.
 - 2026-11-22 — zavedena projektová paměť pro práci napříč Codex chaty.
 - 2026-11-22 — dokončena a commitnuta podpora Reel videa včetně testů a
   dokumentace (`e3fe3ac`); prošly `go test`, `go vet` a `go build`.

@@ -21,9 +21,10 @@ finální titulky do MP4. Pipeline lze po přerušení obnovit z pracovní slož
   `VTT_CZ_WHISPER_MODEL` a `VTT_CZ_VAD_MODEL`.
 - Cloudový režim vyžaduje `OPENAI_API_KEY`; transkripce používá `whisper-1` a
   tři jazykové průchody Responses API model `gpt-5.5`.
-- Experimentální VPS handoff používá SMTP pro odeslání anglického VTT a IMAP
-  pro bezpečné přijetí odpovědi. IMAP klient přidává závislost
-  `github.com/emersion/go-imap v1.2.1`; přístupové údaje patří pouze do env.
+- Experimentální VPS handoff umí lokální Postfix + přímé read-only čtení
+  Maildiru bez hesla i vzdálené SMTP/IMAP. IMAP klient přidává závislost
+  `github.com/emersion/go-imap v1.2.1`; případné přístupové údaje patří pouze
+  do env.
 
 ## Architektura
 
@@ -40,8 +41,8 @@ finální titulky do MP4. Pipeline lze po přerušení obnovit z pracovní slož
   plugin obsahující kopii Work skillu a validátor.
 - `main_test.go` a `internal/localwhisper/*_test.go` — jednotkové testy CLI,
   workflow a algoritmů lokální transkripce.
-- `email.go` — SMTP/MIME odeslání, IMAP listener, párování odpovědí, validace
-  českého VTT a obnova dokončení úlohy.
+- `email.go` — MIME odeslání přes lokální sendmail nebo SMTP, Maildir/IMAP
+  listener, párování odpovědí, validace českého VTT a obnova dokončení úlohy.
 - `deploy/` — příklady systemd user service a env souboru bez tajných hodnot.
 
 ## Datový tok a výstupy
@@ -71,11 +72,12 @@ původní zprávu. Video zůstává na VPS.
 - Reel podpora v commitu `e3fe3ac` přidává samostatný styl titulků a marker
   `.reel-mode`, aby se režim zachoval při obnovení úlohy.
 - E-mailový workflow má izolované testy MIME příloh, odeslání právě jednou,
-  autorizace odesílatele, reply vazby, IMAP cursoru a obnovy dokončení úlohy.
+  lokálního sendmailu a Maildiru, autorizace odesílatele, reply vazby, cursoru
+  a obnovy dokončení úlohy.
   K 2026-11-23 prochází `go test ./...`, `go test -race ./...`,
   `go vet ./...` a `go build ./...` při použití zapisovatelné Go cache v `/tmp`.
-  Reálné SMTP/IMAP spojení, systemd běh na VPS a end-to-end zpracování videa
-  zatím ověřené nejsou.
+  Reálný Postfix/Maildir ani SMTP/IMAP handoff, systemd běh na VPS a
+  end-to-end zpracování videa zatím ověřené nejsou.
 
 Podrobný návod pro uživatele a přesné požadavky jednotlivých režimů jsou v
 `README.md`. Aktuální práce a neověřené kroky jsou v `TODO.md`.
