@@ -1,6 +1,6 @@
 # Kontext projektu vtt-cz
 
-Aktualizováno: 2026-11-23
+Aktualizováno: 2026-11-24
 
 ## Účel
 
@@ -78,13 +78,17 @@ původní zprávu. Video zůstává na VPS.
   a obnovy dokončení úlohy.
   K 2026-11-23 prochází `go test ./...`, `go test -race ./...`,
   `go vet ./...` a `go build ./...` při použití zapisovatelné Go cache v `/tmp`.
-  Reálný Postfix/Maildir ani SMTP/IMAP handoff, systemd běh na VPS a
-  end-to-end zpracování videa zatím ověřené nejsou.
+  Reálný obousměrný Gmail/Postfix/Maildir smoke test prošel: odpověď s českým
+  VTT byla přijata a ověřena, video bylo vypáleno a oba stavové e-maily
+  dorazily do Gmail Inboxu.
 - Server bez browser profilu může vypnout předávání cookies do `yt-dlp` přes
   `VTT_CZ_YTDLP_COOKIES_FROM_BROWSER=none`; systémově spravovaný `yt-dlp`
   může vypnout vlastní aktualizaci přes `VTT_CZ_YTDLP_AUTO_UPDATE=false`.
-- Na VPS je aktivní Postfix alias `vtt-cz@timechip.cz` směrovaný do Maildiru
-  uživatele `skybedy`; binárka a systemd listener ještě nasazené nejsou.
+- Na VPS je aktivní Postfix alias `vtt-cz@timechip.cz`, commit `2132663` je v
+  `/usr/local/bin/vtt-cz` a rootem spravovaná systemd služba běží jako
+  `skybedy`. Server používá standalone `yt-dlp`, existující Whisper medium
+  model a 2GB swap; `--doctor --work --email` i restart listeneru se zachováním
+  cursoru prošly.
 
 Podrobný návod pro uživatele a přesné požadavky jednotlivých režimů jsou v
 `README.md`. Aktuální práce a neověřené kroky jsou v `TODO.md`.

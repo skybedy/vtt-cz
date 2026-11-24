@@ -1,12 +1,9 @@
 # Úkoly
 
-Aktualizováno: 2026-11-23
+Aktualizováno: 2026-11-24
 
 ## Rozpracováno — vysoká priorita
 
-- [ ] Nainstalovat experimentální binárku a systemd listener na VPS;
-  spustit `--doctor --work --email` a ověřit restart, Maildir cursor a obnovu
-  rozpracovaného renderingu.
 - [ ] Ručně ověřit vypálení titulků pro běžné i vertikální video a pokračování
   Reel úlohy přes `.reel-mode`; takové end-to-end ověření není v repozitáři
   doloženo.
@@ -21,6 +18,15 @@ repozitáře evidovány. Nové položky přidávej až po rozhodnutí uživatele
 
 ## Nedávno dokončeno
 
+- 2026-11-24 — dokončen reálný obousměrný smoke test: Gmail odpověď s
+  `smoke.cs.vtt` dorazila přes Postfix do Maildiru, listener VTT ověřil,
+  vypálil `smoke.cs.mp4` a oba stavové e-maily dorazily do Gmail Inboxu.
+- 2026-11-23 — commit `2132663` nasazen na VPS jako rootem chráněná systemd
+  služba běžící pod `skybedy`; `--doctor --work --email` prošel, služba přežila
+  restart se zachovaným Maildir cursorem a testovací VTT bylo doručeno Gmailu.
+- 2026-11-23 — na VPS nainstalována ověřená standalone binárka `yt-dlp`,
+  aktivován 2GB swap a workflow nakonfigurováno pro existující Whisper medium
+  a Silero VAD model.
 - 2026-11-23 — na VPS přidán a aktivován Postfix alias
   `vtt-cz@timechip.cz` do lokálního Maildiru uživatele `skybedy`; původní mapa
   byla před změnou zálohována.
