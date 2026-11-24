@@ -4,6 +4,8 @@ Aktualizováno: 2026-11-24
 
 ## Rozpracováno — vysoká priorita
 
+- [ ] Dokončit na VPS reálnou URL úlohu po nasazení `71b9123`: stažení,
+  lokální přepis, e-mailové předání českého VTT a vypálení výsledného videa.
 - [ ] Ručně ověřit vypálení titulků pro běžné i vertikální video a pokračování
   Reel úlohy přes `.reel-mode`; takové end-to-end ověření není v repozitáři
   doloženo.
@@ -18,6 +20,10 @@ repozitáře evidovány. Nové položky přidávej až po rozhodnutí uživatele
 
 ## Nedávno dokončeno
 
+- 2026-11-24 — commit `71b9123` nasazen na VPS: CLI samo načítá chráněný
+  systémový env soubor, `yt-dlp` používá Node 24 pro YouTube JavaScript
+  challenge a umí spojit oddělený obraz a zvuk. Čistý `--doctor` i simulovaný
+  výběr formátu 1080p se zvukem prošly a e-mailový listener po restartu běží.
 - 2026-11-24 — dokončen reálný obousměrný smoke test: Gmail odpověď s
   `smoke.cs.vtt` dorazila přes Postfix do Maildiru, listener VTT ověřil,
   vypálil `smoke.cs.mp4` a oba stavové e-maily dorazily do Gmail Inboxu.

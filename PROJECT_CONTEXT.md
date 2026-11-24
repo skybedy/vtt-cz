@@ -89,11 +89,12 @@ původní zprávu. Video zůstává na VPS.
 - CLI automaticky načítá bezpečně oprávněný `/etc/vtt-cz/email.env`, případně
   uživatelský `~/.config/vtt-cz/email.env`; existující proměnné prostředí mají
   před souborem přednost.
-- Na VPS je aktivní Postfix alias `vtt-cz@timechip.cz`, commit `2132663` je v
+- Na VPS je aktivní Postfix alias `vtt-cz@timechip.cz`, commit `71b9123` je v
   `/usr/local/bin/vtt-cz` a rootem spravovaná systemd služba běží jako
   `skybedy`. Server používá standalone `yt-dlp`, existující Whisper medium
-  model a 2GB swap; `--doctor --work --email` i restart listeneru se zachováním
-  cursoru prošly.
+  model, Node 24 pro YouTube JavaScript challenge a 2GB swap. Čistý běh
+  `--doctor --work --email` bez ručního načítání env, restart listeneru se
+  zachováním cursoru i simulovaný výběr 1080p obrazu se zvukem prošly.
 
 Podrobný návod pro uživatele a přesné požadavky jednotlivých režimů jsou v
 `README.md`. Aktuální práce a neověřené kroky jsou v `TODO.md`.

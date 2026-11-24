@@ -66,7 +66,7 @@ režimu ChatGPT Work.
 
 ## 2026-11-23 — E-mail jako první experimentální VPS handoff
 
-**Stav:** experimentální, čeká na reálné VPS ověření
+**Stav:** experimentální, e-mailový VPS smoke test ověřen
 
 Před nasazením Telegram varianty se anglické a české VTT předávají přes
 vyhrazenou e-mailovou adresu. Vzdálená varianta používá SMTP s TLS nebo
