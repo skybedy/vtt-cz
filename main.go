@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -27,6 +28,7 @@ const (
 	openAITranscriptionsURL = "https://api.openai.com/v1/audio/transcriptions"
 	openAIResponsesURL      = "https://api.openai.com/v1/responses"
 	maxTranscriptionBytes   = 25 * 1024 * 1024
+	ytDLPVideoFormat        = "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b"
 	standardSubtitleStyle   = "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H40000000,BackColour=&H80000000,BorderStyle=3,Outline=4,Shadow=0,Alignment=2,MarginV=50"
 	reelSubtitleStyle       = "FontSize=9,PrimaryColour=&H00FFFFFF,OutlineColour=&H40000000,BackColour=&H80000000,BorderStyle=3,Outline=2,Shadow=0,Alignment=2,MarginV=28"
 )
@@ -61,6 +63,10 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Chyba:", err)
 		printUsage()
+		os.Exit(1)
+	}
+	if err := loadRuntimeEnvironment(); err != nil {
+		fmt.Fprintln(os.Stderr, "Chyba pri nacitani konfigurace:", err)
 		os.Exit(1)
 	}
 	if options.doctor {
@@ -328,6 +334,17 @@ func runDoctor(options cliOptions, output io.Writer) error {
 		} else {
 			fmt.Fprintf(output, "[INFO] yt-dlp cookies: prohlizec %s\n", cookies[1])
 		}
+		if runtime := ytDLPJSRuntimeSetting(); runtime == "" {
+			fmt.Fprintln(output, "[INFO] yt-dlp JS runtime: nenastaven; YouTube muze nabidnout mene formatu")
+		} else {
+			name, path := splitYTDLPJSRuntime(runtime)
+			if path == "" {
+				path, err := exec.LookPath(name)
+				report("yt-dlp JS runtime", path, err)
+			} else {
+				checkPath("yt-dlp JS runtime", path, true)
+			}
+		}
 	}
 
 	if options.workMode || options.localWhisper {
@@ -361,6 +378,119 @@ func runDoctor(options cliOptions, output io.Writer) error {
 	}
 	fmt.Fprintln(output, "Prostredi je pro zvoleny rezim pripravene.")
 	return nil
+}
+
+func loadRuntimeEnvironment() error {
+	explicit := strings.TrimSpace(os.Getenv("VTT_CZ_ENV_FILE"))
+	if explicit != "" {
+		return loadEnvironmentFile(explicit)
+	}
+
+	candidates := []string{"/etc/vtt-cz/email.env"}
+	if configDir, err := os.UserConfigDir(); err == nil && configDir != "" {
+		candidates = append(candidates, filepath.Join(configDir, "vtt-cz", "email.env"))
+	}
+	for _, path := range candidates {
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("kontrola %s: %w", path, err)
+		}
+		return loadEnvironmentFile(path)
+	}
+	return nil
+}
+
+func loadEnvironmentFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("otevreni %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("%s musi byt bezny soubor, nikoli symlink", path)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("%s nesmi byt zapisovatelny skupinou ani ostatnimi", path)
+	}
+	if info.Size() > 1024*1024 {
+		return fmt.Errorf("%s je neocekavane velky", path)
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("otevreni %s: %w", path, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for lineNumber := 1; scanner.Scan(); lineNumber++ {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		separator := strings.IndexByte(line, '=')
+		if separator <= 0 {
+			return fmt.Errorf("%s:%d nema tvar JMENO=HODNOTA", path, lineNumber)
+		}
+		name := strings.TrimSpace(line[:separator])
+		if !validEnvironmentName(name) {
+			return fmt.Errorf("%s:%d obsahuje neplatny nazev promenne", path, lineNumber)
+		}
+		if _, exists := os.LookupEnv(name); exists {
+			continue
+		}
+		value, err := parseEnvironmentValue(strings.TrimSpace(line[separator+1:]))
+		if err != nil {
+			return fmt.Errorf("%s:%d: %w", path, lineNumber, err)
+		}
+		if err := os.Setenv(name, value); err != nil {
+			return fmt.Errorf("nastaveni %s z %s: %w", name, path, err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("cteni %s: %w", path, err)
+	}
+	return nil
+}
+
+func validEnvironmentName(name string) bool {
+	if name == "" || name[0] != '_' && (name[0] < 'A' || name[0] > 'Z') && (name[0] < 'a' || name[0] > 'z') {
+		return false
+	}
+	for index := 1; index < len(name); index++ {
+		character := name[index]
+		if character != '_' && (character < 'A' || character > 'Z') && (character < 'a' || character > 'z') && (character < '0' || character > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func parseEnvironmentValue(value string) (string, error) {
+	if len(value) < 2 {
+		if value == "'" || value == "\"" {
+			return "", fmt.Errorf("nedokoncene uvozovky")
+		}
+		return value, nil
+	}
+	if value[0] == '\'' || value[len(value)-1] == '\'' {
+		if value[0] != '\'' || value[len(value)-1] != '\'' {
+			return "", fmt.Errorf("nedokoncene jednoduche uvozovky")
+		}
+		return value[1 : len(value)-1], nil
+	}
+	if value[0] == '"' || value[len(value)-1] == '"' {
+		if value[0] != '"' || value[len(value)-1] != '"' {
+			return "", fmt.Errorf("nedokoncene dvojite uvozovky")
+		}
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return "", fmt.Errorf("neplatna hodnota v uvozovkach: %w", err)
+		}
+		return unquoted, nil
+	}
+	return value, nil
 }
 
 func readURL(reader *bufio.Reader, initialURL string) string {
@@ -743,22 +873,8 @@ func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 		}
 	}
 
-	arguments := []string{
-		ytDLPPath,
-	}
-	arguments = append(arguments, ytDLPCookieArguments()...)
-	arguments = append(arguments,
-		"--format",
-		"best[acodec!=none][vcodec!=none]/best",
-		"--extract-audio",
-		"--audio-format",
-		"mp3",
-		"--audio-quality",
-		"64K",
-		"--keep-video",
-		url,
-	)
-	cmd := exec.Command(arguments[0], arguments[1:]...)
+	arguments := ytDLPDownloadArguments(url)
+	cmd := exec.Command(ytDLPPath, arguments...)
 
 	cmd.Dir = workDir
 	cmd.Stdout = os.Stdout
@@ -779,6 +895,23 @@ func downloadVideoAndMP3(url string, workDir string) (string, string, error) {
 	}
 
 	return videoPath, mp3Path, nil
+}
+
+func ytDLPDownloadArguments(url string) []string {
+	arguments := make([]string, 0, 16)
+	arguments = append(arguments, ytDLPCookieArguments()...)
+	arguments = append(arguments, ytDLPJSRuntimeArguments()...)
+	return append(arguments,
+		"--format",
+		ytDLPVideoFormat,
+		"--extract-audio",
+		"--audio-format",
+		"mp3",
+		"--audio-quality",
+		"64K",
+		"--keep-video",
+		url,
+	)
 }
 
 func ytDLPCookieArguments() []string {
@@ -802,6 +935,27 @@ func ytDLPAutoUpdateEnabled() bool {
 	default:
 		return true
 	}
+}
+
+func ytDLPJSRuntimeSetting() string {
+	return strings.TrimSpace(os.Getenv("VTT_CZ_YTDLP_JS_RUNTIMES"))
+}
+
+func ytDLPJSRuntimeArguments() []string {
+	value := ytDLPJSRuntimeSetting()
+	if value == "" {
+		return nil
+	}
+	return []string{"--js-runtimes", value}
+}
+
+func splitYTDLPJSRuntime(value string) (string, string) {
+	first := strings.TrimSpace(strings.Split(value, ",")[0])
+	name, path, found := strings.Cut(first, ":")
+	if !found {
+		return first, ""
+	}
+	return strings.TrimSpace(name), strings.TrimSpace(path)
 }
 
 func updateYTDLP(ytDLPPath string) error {

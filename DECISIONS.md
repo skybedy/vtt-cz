@@ -90,3 +90,8 @@ Chybějící runtime součásti se řeší explicitní read-only kontrolou `--do
 která pro zvolený režim vypíše programy, modely a e-mailovou konfiguraci.
 Aplikace sama nespouští privilegované instalátory ani nemění systém; tím se
 odděluje opakovatelná diagnostika od distribučně specifického deploymentu.
+
+Serverová konfigurace se může automaticky načíst z `/etc/vtt-cz/email.env`,
+aby interaktivní CLI a systemd používaly stejné hodnoty. Procesní prostředí má
+vyšší prioritu; soubor musí být běžný, nesmí být symlink ani být zapisovatelný
+skupinou či ostatními uživateli.

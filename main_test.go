@@ -81,7 +81,7 @@ func TestParseArguments(t *testing.T) {
 
 func TestDoctorWorkEmailEnvironment(t *testing.T) {
 	binDir := t.TempDir()
-	for _, name := range []string{"ffmpeg", "ffprobe", "nice", "ionice", "yt-dlp", "whisper-cli", "vad-speech-segments", "sendmail"} {
+	for _, name := range []string{"ffmpeg", "ffprobe", "nice", "ionice", "yt-dlp", "node", "whisper-cli", "vad-speech-segments", "sendmail"} {
 		writeTestExecutable(t, filepath.Join(binDir, name), "#!/bin/sh\nexit 0\n")
 	}
 	modelDir := t.TempDir()
@@ -105,6 +105,7 @@ func TestDoctorWorkEmailEnvironment(t *testing.T) {
 	t.Setenv("VTT_CZ_WHISPER_MODEL", whisperModel)
 	t.Setenv("VTT_CZ_VAD_MODEL", vadModel)
 	t.Setenv("VTT_CZ_YTDLP_COOKIES_FROM_BROWSER", "none")
+	t.Setenv("VTT_CZ_YTDLP_JS_RUNTIMES", "node:"+filepath.Join(binDir, "node"))
 	t.Setenv("VTT_CZ_EMAIL_TRANSPORT", "local")
 	t.Setenv("VTT_CZ_EMAIL_FROM", "bot@example.com")
 	t.Setenv("VTT_CZ_EMAIL_TO", "user@example.net")
@@ -124,11 +125,20 @@ func TestDoctorWorkEmailEnvironment(t *testing.T) {
 func TestYTDLPEnvironmentOptions(t *testing.T) {
 	t.Setenv("VTT_CZ_YTDLP_COOKIES_FROM_BROWSER", "none")
 	t.Setenv("VTT_CZ_YTDLP_AUTO_UPDATE", "false")
+	t.Setenv("VTT_CZ_YTDLP_JS_RUNTIMES", "node:/opt/node")
 	if arguments := ytDLPCookieArguments(); len(arguments) != 0 {
 		t.Fatalf("ytDLPCookieArguments() = %#v", arguments)
 	}
 	if ytDLPAutoUpdateEnabled() {
 		t.Fatal("ytDLPAutoUpdateEnabled() = true")
+	}
+	if arguments := ytDLPJSRuntimeArguments(); len(arguments) != 2 || arguments[0] != "--js-runtimes" || arguments[1] != "node:/opt/node" {
+		t.Fatalf("ytDLPJSRuntimeArguments() = %#v", arguments)
+	}
+	downloadArguments := ytDLPDownloadArguments("https://example.com/video")
+	joined := strings.Join(downloadArguments, " ")
+	if !strings.Contains(joined, "--format "+ytDLPVideoFormat) || !strings.Contains(joined, "--js-runtimes node:/opt/node") {
+		t.Fatalf("ytDLPDownloadArguments() = %#v", downloadArguments)
 	}
 
 	t.Setenv("VTT_CZ_YTDLP_COOKIES_FROM_BROWSER", "firefox:default-release")
@@ -139,6 +149,52 @@ func TestYTDLPEnvironmentOptions(t *testing.T) {
 	}
 	if !ytDLPAutoUpdateEnabled() {
 		t.Fatal("ytDLPAutoUpdateEnabled() = false")
+	}
+}
+
+func TestLoadEnvironmentFilePreservesExistingEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "email.env")
+	if err := os.WriteFile(path, []byte("# test\nVTT_CZ_TEST_FROM_FILE='loaded value'\nVTT_CZ_TEST_OVERRIDE=from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"VTT_CZ_TEST_FROM_FILE", "VTT_CZ_TEST_OVERRIDE"} {
+		oldValue, existed := os.LookupEnv(name)
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if existed {
+				_ = os.Setenv(name, oldValue)
+			} else {
+				_ = os.Unsetenv(name)
+			}
+		})
+	}
+	if err := os.Setenv("VTT_CZ_TEST_OVERRIDE", "from-shell"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VTT_CZ_ENV_FILE", path)
+	if err := loadRuntimeEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("VTT_CZ_TEST_FROM_FILE"); got != "loaded value" {
+		t.Fatalf("VTT_CZ_TEST_FROM_FILE = %q", got)
+	}
+	if got := os.Getenv("VTT_CZ_TEST_OVERRIDE"); got != "from-shell" {
+		t.Fatalf("VTT_CZ_TEST_OVERRIDE = %q", got)
+	}
+}
+
+func TestLoadEnvironmentFileRejectsWritableFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "email.env")
+	if err := os.WriteFile(path, []byte("VTT_CZ_TEST=value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadEnvironmentFile(path); err == nil {
+		t.Fatal("loadEnvironmentFile() accepted a group/world-writable file")
 	}
 }
 

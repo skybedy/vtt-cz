@@ -53,7 +53,16 @@ Na serveru bez profilu Firefoxu nastav
 `VTT_CZ_YTDLP_COOKIES_FROM_BROWSER=none`. Hodnota je jinak predvolene
 `firefox` a muze obsahovat i profil podporovany `yt-dlp`. Pokud je `yt-dlp`
 spravovan systemove, lze jeho pokus o vlastni aktualizaci vypnout pres
-`VTT_CZ_YTDLP_AUTO_UPDATE=false`.
+`VTT_CZ_YTDLP_AUTO_UPDATE=false`. Pro aktualni YouTube extrakci lze nastavit
+JavaScript runtime, napriklad
+`VTT_CZ_YTDLP_JS_RUNTIMES=node:/usr/local/bin/node`. Program stahuje oddelene
+video a audio do rozliseni 1080p a necha `yt-dlp` spojit je pres `ffmpeg`.
+
+Pri startu aplikace automaticky nacte prvni existujici konfiguraci z
+`/etc/vtt-cz/email.env` nebo `~/.config/vtt-cz/email.env`. Cestu lze prepsat
+promennou `VTT_CZ_ENV_FILE`. Hodnoty uz nastavene v prostredi maji pred
+souborem prednost. Konfiguracni soubor nesmi byt symlink ani zapisovatelny
+skupinou ci ostatnimi uzivateli.
 
 ## Spusteni
 

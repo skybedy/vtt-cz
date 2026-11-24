@@ -84,6 +84,11 @@ původní zprávu. Video zůstává na VPS.
 - Server bez browser profilu může vypnout předávání cookies do `yt-dlp` přes
   `VTT_CZ_YTDLP_COOKIES_FROM_BROWSER=none`; systémově spravovaný `yt-dlp`
   může vypnout vlastní aktualizaci přes `VTT_CZ_YTDLP_AUTO_UPDATE=false`.
+  YouTube JavaScript challenge lze obsloužit runtime nastaveným v
+  `VTT_CZ_YTDLP_JS_RUNTIMES`; oddělené video a audio se spojují přes `ffmpeg`.
+- CLI automaticky načítá bezpečně oprávněný `/etc/vtt-cz/email.env`, případně
+  uživatelský `~/.config/vtt-cz/email.env`; existující proměnné prostředí mají
+  před souborem přednost.
 - Na VPS je aktivní Postfix alias `vtt-cz@timechip.cz`, commit `2132663` je v
   `/usr/local/bin/vtt-cz` a rootem spravovaná systemd služba běží jako
   `skybedy`. Server používá standalone `yt-dlp`, existující Whisper medium
